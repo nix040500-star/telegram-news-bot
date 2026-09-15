@@ -1,15 +1,12 @@
 import os
 import requests
 import feedparser
-import google.generativeai as genai
+from google import genai
 
 # 1. 깃허브 Secrets에서 설정값 불러오기
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# 구글 제미나이 설정 (구형 안정 방식)
-genai.configure(api_key=GEMINI_API_KEY)
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -28,20 +25,24 @@ def main():
     
     news_text = "\n\n".join(news_list)
     
-    # Gemini AI로 요약하기
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # Gemini AI 최신 클라이언트 및 모델 설정 (gemini-2.5-flash 사용)
+    client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
-다음 뉴스들을 분석해서 핵심 내용을 한국어로 깔끔하게, 사람이 쓴 것처럼 자연스럽게 이모티콘 없이 요약해줘.
+다음 뉴스들을 분석해서 핵심 내용을 한국어로 깔끔하게 요약해줘.
 
 [출력 형식 가이드]
-1. 전체 주요 뉴스 브리핑 (4~6줄 요약)
+1. 전체 주요 뉴스 브리핑 (3~4줄 요약)
 2. 각 기사별 핵심 내용 및 참고 링크 목록
 
 [수집된 뉴스 데이터]
 {news_text}
 """
     
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    
     summary = response.text
     
     # 텔레그램 전송
