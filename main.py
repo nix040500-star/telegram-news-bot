@@ -15,40 +15,41 @@ def send_telegram(text):
     print(f"텔레그램 전송 응답: {response.status_code}")
 
 def main():
-    # 구글 뉴스 RSS (사용자 Agent 추가 등으로 안정성 보완 가능)
+    # 코인 및 미국 증시 뉴스 RSS 피드 가져오기
     rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥&hl=ko&gl=KR&ceid=KR:ko"
     
-    # 봇 차단을 막기 위해 User-Agent 헤더를 포함하여 feedparser에 전달
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
     feed = feedparser.parse(response_rss.content)
     
-    news_list = []
-    # 상위 5개 뉴스 제목 및 링크 수집
-    for i, entry in enumerate(feed.entries[:5], 1):
-        news_list.append(f"[{i}] 제목: {entry.title}\n링크: {entry.link}")
+    news_items = []
+    # 상위 5개 뉴스 데이터 수집
+    for entry in feed.entries[:5]:
+        news_items.append({"title": entry.title, "link": entry.link})
     
-    news_text = "\n\n".join(news_list)
-    
-    # [중요] 수집된 뉴스가 없을 때 방어 코드 추가
-    if not news_text.strip():
-        print("에러: 수집된 뉴스 데이터가 없습니다. RSS 주소나 네트워크를 확인하세요.")
+    if not news_items:
+        print("에러: 수집된 뉴스 데이터가 없습니다.")
         send_telegram("⚠️ 뉴스 요약 봇: 뉴스를 수집하는 데 실패했습니다.")
         return
 
-    # Gemini AI 최신 클라이언트 및 모델 설정 (gemini-3.6-flash)
+    # Gemini AI 클라이언트 설정
     client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = f"""
-다음 뉴스들을 분석해서 핵심 내용을 한국어로 깔끔하게 요약해줘.
-
-[출력 형식 가이드]
-1. 전체 주요 뉴스 브리핑 (3~4줄 요약)
-2. 각 기사별 핵심 내용 및 참고 링크 목록
-
-[수집된 뉴스 데이터]
-{news_text}
-"""
     
+    # [핵심] 전문가 톤앤매너와 개별 기사 5~6줄 상세 요약 가이드라인 적용
+    prompt = f"""
+너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 뉴스 기사 목록을 보고, 각 기사별로 **전문가가 직접 분석하고 풀어주는 듯한 자연스러운 문체로 5~6줄 정도의 깊이 있는 요약 글**을 작성해줘.
+
+[작성 규칙]
+1. 기계적인 개조식(1번, 2번 같은 딱딱한 형태)보다는 **자연스럽고 부드러운 산문체(줄글 형태)**로 5~6줄 분량으로 상세히 서술할 것.
+2. 왜 이 뉴스가 중요한지, 시장에 어떤 의미를 갖는지 전문가의 시각을 담아낼 것.
+3. 각 기사 본문 설명이 끝난 바로 아래에 `🔗 [기사 원문 읽어보기](링크주소)` 형태로 링크를 첨부할 것.
+
+[수집된 뉴스 데이터 목록]
+"""
+
+    for idx, item in enumerate(news_items, 1):
+        prompt += f"\n--- [기사 {idx}] ---\n제목: {item['title']}\n링크: {item['link']}\n"
+
     response = client.models.generate_content(
         model="gemini-3.6-flash",
         contents=prompt,
@@ -56,7 +57,7 @@ def main():
     
     summary = response.text
     
-    # 텔레그램 전송
+    # 텔레그램 전송 (글자 수 제한이나 가독성을 고려해 전송)
     send_telegram(summary)
 
 if __name__ == "__main__":
