@@ -1,51 +1,30 @@
-import os
-import requests
-import feedparser
-import google.generativeai as genai
+name: Daily News Auto Summary
 
-# 1. 깃허브 Secrets에서 설정값 불러오기
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+on:
+  schedule:
+    - cron: '0 23 * * *'
+  workflow_dispatch:
 
-# 구글 제미나이 설정 (구형 안정 방식)
-genai.configure(api_key=GEMINI_API_KEY)
+jobs:
+  run-python-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-def send_telegram(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-def main():
-    # 코인 및 미국 증시 뉴스 RSS 피드 가져오기
-    rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥&hl=ko&gl=KR&ceid=KR:ko"
-    feed = feedparser.parse(rss_url)
-    
-    news_list = []
-    # 상위 5개 뉴스 제목 및 링크 수집
-    for i, entry in enumerate(feed.entries[:5], 1):
-        news_list.append(f"[{i}] 제목: {entry.title}\n링크: {entry.link}")
-    
-    news_text = "\n\n".join(news_list)
-    
-    # Gemini AI로 요약하기
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    prompt = f"""
-다음 뉴스들을 분석해서 핵심 내용을 한국어로 깔끔하게 요약해줘.
+      - name: Install dependencies
+        run: |
+          pip install requests feedparser google-generativeai
 
-[출력 형식 가이드]
-1. 전체 주요 뉴스 브리핑 (3~4줄 요약)
-2. 각 기사별 핵심 내용 및 참고 링크 목록
-
-[수집된 뉴스 데이터]
-{news_text}
-"""
-    
-    response = model.generate_content(prompt)
-    summary = response.text
-    
-    # 텔레그램 전송
-    send_telegram(summary)
-
-if __name__ == "__main__":
-    main()
+      - name: Run script
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: |
+          python main.py
