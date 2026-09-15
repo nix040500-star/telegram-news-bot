@@ -1,7 +1,9 @@
 import os
+import time
 import requests
 import feedparser
 from google import genai
+from google.genai.errors import ServerError
 
 # 1. 깃허브 Secrets에서 설정값 불러오기
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -23,7 +25,6 @@ def main():
     feed = feedparser.parse(response_rss.content)
     
     news_items = []
-    # 상위 5개 뉴스 데이터 수집
     for entry in feed.entries[:5]:
         news_items.append({"title": entry.title, "link": entry.link})
     
@@ -35,7 +36,6 @@ def main():
     # Gemini AI 클라이언트 설정
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # [핵심] 전문가 톤앤매너와 개별 기사 5~6줄 상세 요약 가이드라인 적용
     prompt = f"""
 너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 뉴스 기사 목록을 보고, 각 기사별로 **전문가가 직접 분석하고 풀어주는 듯한 자연스러운 문체로 5~6줄 정도의 깊이 있는 요약 글**을 작성해줘.
 
@@ -50,15 +50,32 @@ def main():
     for idx, item in enumerate(news_items, 1):
         prompt += f"\n--- [기사 {idx}] ---\n제목: {item['title']}\n링크: {item['link']}\n"
 
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-    )
+    # [핵심] 503 서버 과부하 에러 발생 시 최대 3번까지 재시도하는 로직
+    max_retries = 3
+    response = None
     
-    summary = response.text
-    
-    # 텔레그램 전송 (글자 수 제한이나 가독성을 고려해 전송)
-    send_telegram(summary)
+    for attempt in range(max_retries):
+        try:
+            print(f"AI 요약 요청 시도 중... ({attempt + 1}/{max_retries})")
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            break # 성공하면 반복문 탈출
+        except ServerError as e:
+            print(f"서버 과부하(503) 발생: {e}")
+            if attempt < max_retries - 1:
+                wait_time = (attempt + 1) * 5 # 5초, 10초 대기
+                print(f"{wait_time}초 후 재시도합니다...")
+                time.sleep(wait_time)
+            else:
+                print("최대 재시도 횟수를 초과했습니다.")
+                raise e
+
+    if response:
+        summary = response.text
+        # 텔레그램 전송
+        send_telegram(summary)
 
 if __name__ == "__main__":
     main()
