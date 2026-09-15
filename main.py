@@ -5,7 +5,6 @@ import feedparser
 from google import genai
 from google.genai.errors import ServerError
 
-# 1. 깃허브 Secrets에서 설정값 불러오기
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -13,69 +12,56 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    response = requests.post(url, json=payload)
-    print(f"텔레그램 전송 응답: {response.status_code}")
+    requests.post(url, json=payload)
 
 def main():
-    # 코인 및 미국 증시 뉴스 RSS 피드 가져오기
     rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥&hl=ko&gl=KR&ceid=KR:ko"
-    
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
     feed = feedparser.parse(response_rss.content)
     
-    news_items = []
-    for entry in feed.entries[:5]:
-        news_items.append({"title": entry.title, "link": entry.link})
-    
-    if not news_items:
+    if not feed.entries:
         print("에러: 수집된 뉴스 데이터가 없습니다.")
-        send_telegram("⚠️ 뉴스 요약 봇: 뉴스를 수집하는 데 실패했습니다.")
         return
 
-    # Gemini AI 클라이언트 설정
+    # 가장 최신 기사 딱 1개만 타겟팅
+    latest_entry = feed.entries[0]
+    title = latest_entry.title
+    link = latest_entry.link
+
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 뉴스 기사 목록을 보고, 각 기사별로 **전문가가 직접 분석하고 풀어주는 듯한 자연스러운 문체로 5~6줄 정도의 깊이 있는 요약 글**을 작성해줘.
+너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 보고, **전문가가 직접 분석하고 풀어주는 듯한 자연스러운 산문체(줄글 형태)로 5~6줄 분량의 깊이 있는 요약 글**을 작성해줘.
 
 [작성 규칙]
-1. 기계적인 개조식(1번, 2번 같은 딱딱한 형태)보다는 **자연스럽고 부드러운 산문체(줄글 형태)**로 5~6줄 분량으로 상세히 서술할 것.
-2. 왜 이 뉴스가 중요한지, 시장에 어떤 의미를 갖는지 전문가의 시각을 담아낼 것.
-3. 각 기사 본문 설명이 끝난 바로 아래에 `🔗 [기사 원문 읽어보기](링크주소)` 형태로 링크를 첨부할 것.
+1. 기계적인 번호 매기기나 딱딱한 개조식을 절대 쓰지 말고, 자연스러운 문장 형태로 단락을 나누어 가독성 있게 작성할 것.
+2. 이 뉴스가 시장에 갖는 의미와 배경을 전문가의 시각으로 깊이 있게 풀어낼 것.
+3. 글의 맨 마지막 줄에 반드시 `🔗 [기사 원문 읽어보기]({link})` 형태로 링크를 남겨둘 것.
 
-[수집된 뉴스 데이터 목록]
+[대상 기사]
+제목: {title}
+링크: {link}
 """
 
-    for idx, item in enumerate(news_items, 1):
-        prompt += f"\n--- [기사 {idx}] ---\n제목: {item['title']}\n링크: {item['link']}\n"
-
-    # [핵심] 503 서버 과부하 에러 발생 시 최대 3번까지 재시도하는 로직
     max_retries = 3
     response = None
     
     for attempt in range(max_retries):
         try:
-            print(f"AI 요약 요청 시도 중... ({attempt + 1}/{max_retries})")
             response = client.models.generate_content(
                 model="gemini-3.6-flash",
                 contents=prompt,
             )
-            break # 성공하면 반복문 탈출
+            break
         except ServerError as e:
-            print(f"서버 과부하(503) 발생: {e}")
             if attempt < max_retries - 1:
-                wait_time = (attempt + 1) * 5 # 5초, 10초 대기
-                print(f"{wait_time}초 후 재시도합니다...")
-                time.sleep(wait_time)
+                time.sleep(5)
             else:
-                print("최대 재시도 횟수를 초과했습니다.")
                 raise e
 
     if response:
-        summary = response.text
-        # 텔레그램 전송
-        send_telegram(summary)
+        send_telegram(response.text)
 
 if __name__ == "__main__":
     main()
