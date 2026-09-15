@@ -14,20 +14,29 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    # 구글 뉴스 RSS 피드 가져오기
-    rss_url = "https://news.google.com/rss?hl=ko&gl=KR&ceid=KR:ko"
+    # 코인 및 미국 증시 뉴스 RSS 피드 가져오기
+    rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥&hl=ko&gl=KR&ceid=KR:ko"
     feed = feedparser.parse(rss_url)
     
     news_list = []
     # 상위 5개 뉴스 제목 및 링크 수집
-    for entry in feed.entries[:5]:
-        news_list.append(f"- 제목: {entry.title}\n  링크: {entry.link}")
+    for i, entry in enumerate(feed.entries[:5], 1):
+        news_list.append(f"[{i}] 제목: {entry.title}\n링크: {entry.link}")
     
-    news_text = "\n".join(news_list)
+    news_text = "\n\n".join(news_list)
     
-    # Gemini AI로 요약하기
+    # Gemini AI로 요약하기 (출력 템플릿 지정)
     client = genai.Client(api_key=GEMINI_API_KEY)
-    prompt = f"다음 뉴스 목록을 보고, 텔레그램에 올리기 좋게 핵심만 3~4줄로 깔끔하게 요약해줘. 링크도 같이 남겨줘.\n\n{news_text}"
+    prompt = f"""
+다음 뉴스들을 분석해서 핵심 내용을 한국어로 사람이 쓴 것처럼 이모티콘 없이 자연스럽고 깔끔하게 요약해줘.
+
+[출력 형식 가이드]
+1. 전체 주요 뉴스 브리핑 (4~6줄 요약)
+2. 각 기사별 핵심 내용 및 참고 링크 목록
+
+[수집된 뉴스 데이터]
+{news_text}
+"""
     
     response = client.models.generate_content(
         model="gemini-2.5-flash",
