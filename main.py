@@ -11,12 +11,17 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+    response = requests.post(url, json=payload)
+    print(f"텔레그램 전송 응답: {response.status_code}")
 
 def main():
-    # 코인 및 미국 증시 뉴스 RSS 피드 가져오기
+    # 구글 뉴스 RSS (사용자 Agent 추가 등으로 안정성 보완 가능)
     rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥&hl=ko&gl=KR&ceid=KR:ko"
-    feed = feedparser.parse(rss_url)
+    
+    # 봇 차단을 막기 위해 User-Agent 헤더를 포함하여 feedparser에 전달
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response_rss = requests.get(rss_url, headers=headers)
+    feed = feedparser.parse(response_rss.content)
     
     news_list = []
     # 상위 5개 뉴스 제목 및 링크 수집
@@ -25,7 +30,13 @@ def main():
     
     news_text = "\n\n".join(news_list)
     
-    # Gemini AI 최신 클라이언트 및 모델 설정 (gemini-2.5-flash 사용)
+    # [중요] 수집된 뉴스가 없을 때 방어 코드 추가
+    if not news_text.strip():
+        print("에러: 수집된 뉴스 데이터가 없습니다. RSS 주소나 네트워크를 확인하세요.")
+        send_telegram("⚠️ 뉴스 요약 봇: 뉴스를 수집하는 데 실패했습니다.")
+        return
+
+    # Gemini AI 최신 클라이언트 및 모델 설정 (gemini-3.6-flash)
     client = genai.Client(api_key=GEMINI_API_KEY)
     prompt = f"""
 다음 뉴스들을 분석해서 핵심 내용을 한국어로 깔끔하게 요약해줘.
