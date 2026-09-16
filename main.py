@@ -98,5 +98,7 @@ def main():
         # 전송 완료된 링크 저장 (다음 실행 때 중복 발송 차단)
         save_sent_url(link)
 
-if name == "main":
-    main()
+if __name__ == "__main__":
+    url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/getUpdates"
+    response = requests.get(url, timeout=30)
+    print(response.text)
