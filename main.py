@@ -28,7 +28,7 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥+OR+리플&hl=ko&gl=KR&ceid=KR:ko"
+    rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥+OR+리플+OR+이더리움+OR+코인+OR+연준+OR+금리+OR+트럼프+OR+일론머스크+OR+테슬라+OR+엔비디아&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
     feed = feedparser.parse(response_rss.content)
@@ -98,5 +98,5 @@ def main():
         # 전송 완료된 링크 저장 (다음 실행 때 중복 발송 차단)
         save_sent_url(link)
 
-if __name__ == "__main__":
+if name == "main":
     main()
