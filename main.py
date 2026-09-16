@@ -9,160 +9,94 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# 이미 보낸 기사 링크를 기록할 파일 (중복 발송 방지용)
 SENT_URLS_FILE = "sent_urls.txt"
-
 
 def load_sent_urls():
     if not os.path.exists(SENT_URLS_FILE):
         return set()
-
     with open(SENT_URLS_FILE, "r", encoding="utf-8") as f:
-        return {line.strip() for line in f if line.strip()}
-
+        return set(line.strip() for line in f if line.strip())
 
 def save_sent_url(url):
     with open(SENT_URLS_FILE, "a", encoding="utf-8") as f:
         f.write(url + "\n")
 
-
 def send_telegram(text):
-    if not TELEGRAM_TOKEN:
-        raise RuntimeError("TELEGRAM_TOKEN이 설정되지 않았습니다.")
-
-    if not TELEGRAM_CHAT_ID:
-        raise RuntimeError("TELEGRAM_CHAT_ID가 설정되지 않았습니다.")
-
-    api_url = (
-        "https://api.telegram.org/bot"
-        + TELEGRAM_TOKEN
-        + "/sendMessage"
-    )
-
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "disable_web_page_preview": False,
-    }
-
-    response = requests.post(
-        api_url,
-        json=payload,
-        timeout=30
-    )
-
-    if not response.ok:
-        raise RuntimeError(
-            "텔레그램 전송 실패: "
-            + str(response.status_code)
-            + " / "
-            + response.text
-        )
-
-    print("텔레그램 전송 성공")
-
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    requests.post(url, json=payload)
 
 def main():
-    print("뉴스봇 시작")
-
-    if not GEMINI_API_KEY:
-        raise RuntimeError("GEMINI_API_KEY가 설정되지 않았습니다.")
-
-    rss_url = (
-        "https://news.google.com/rss/search?"
-        "q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥+OR+리플"
-        "&hl=ko&gl=KR&ceid=KR:ko"
-    )
-
-    rss_response = requests.get(
-        rss_url,
-        headers={"User-Agent": "Mozilla/5.0"},
-        timeout=30
-    )
-    rss_response.raise_for_status()
-
-    feed = feedparser.parse(rss_response.content)
-
-    print("수집 기사:", len(feed.entries))
-
+    rss_url = "https://news.google.com/rss/search?q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥+OR+리플&hl=ko&gl=KR&ceid=KR:ko"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response_rss = requests.get(rss_url, headers=headers)
+    feed = feedparser.parse(response_rss.content)
+    
     if not feed.entries:
-        print("수집된 뉴스가 없습니다.")
+        print("에러: 수집된 뉴스 데이터가 없습니다.")
         return
 
     sent_urls = load_sent_urls()
-
+    
+    # 아직 전송하지 않은 가장 최신 기사 1개만 타겟팅
     target_entry = None
-
     for entry in feed.entries:
         if entry.link not in sent_urls:
             target_entry = entry
             break
-
-    if target_entry is None:
+            
+    if not target_entry:
         print("새로운 기사가 없습니다.")
         return
 
     title = target_entry.title
     link = target_entry.link
 
-    print("새 뉴스:", title)
-
     client = genai.Client(api_key=GEMINI_API_KEY)
-
+    
+    # 요청하신 예시 스타일과 링크 서식을 반영한 프롬프트
     prompt = f"""
-아래 금융·암호화폐 뉴스를 한국어로 요약해줘.
+너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 바탕으로, 투자자들이 핵심 내용을 한눈에 파악할 수 있도록 3~4개의 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성해줘.
 
-작성 규칙:
-- 객관적이고 신뢰감 있는 뉴스 스타일
-- 핵심 내용을 3~4개의 자연스러운 단락으로 작성
-- 불필요한 번호 매기기 금지
-- 투자자가 이해하기 쉽게 작성
-- 마지막 줄에 기사 링크 표시
+[작성 규칙]
+1. 보내준 리플/규제 관련 예시 기사처럼, 객관적이면서도 시장에 미치는 의미를 자연스럽고 깊이 있게 서술할 것.
+2. 기계적인 개조식이나 번호 매기기는 쓰지 말고, 자연스러운 줄글 형태로 단락을 구분할 것.
+3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
+🔗 [기사 원문 보러가기]({link})
 
-제목:
-{title}
-
-기사 링크:
-{link}
+[대상 기사]
+제목: {title}
+링크: {link}
 """
 
-    ai_response = None
-
-    for attempt in range(3):
+    max_retries = 3
+    response = None
+    
+    for attempt in range(max_retries):
         try:
-            print(f"Gemini 요약 시도 {attempt + 1}/3")
-
-            ai_response = client.models.generate_content(
+            response = client.models.generate_content(
                 model="gemini-3.6-flash",
-                contents=prompt
+                contents=prompt,
             )
             break
+        except ServerError as e:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+            else:
+                raise e
 
-        except ServerError:
-            if attempt == 2:
-                raise
+    if response:
+        result_text = response.text
+        
+        # 혹시라도 AI가 링크 형식을 빼먹었을 경우를 대비한 안전 장치
+        if "[기사 원문 보러가기]" not in result_text:
+            result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
+            
+        send_telegram(result_text)
+        
+        # 전송 완료된 링크 저장 (다음 실행 때 중복 발송 차단)
+        save_sent_url(link)
 
-            time.sleep(5)
-
-    if ai_response is None or not ai_response.text:
-        raise RuntimeError("Gemini 요약 결과가 없습니다.")
-
-    result_text = ai_response.text.strip()
-
-    result_text += (
-        "\n\n🔗 기사 원문 보러가기\n"
-        + link
-    )
-
-    print("Gemini 요약 완료")
-
-    send_telegram(result_text)
-
-    # 텔레그램 전송에 성공한 기사만 기록
-    save_sent_url(link)
-
-    print("기사 기록 완료")
-    print("뉴스봇 정상 종료")
-
-
-if __name__ == "__main__":
+if name == "main":
     main()
