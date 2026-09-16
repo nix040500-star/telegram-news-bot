@@ -99,6 +99,4 @@ def main():
         save_sent_url(link)
 
 if __name__ == "__main__":
-    url = "https://api.telegram.org/bot" + TELEGRAM_TOKEN + "/getUpdates"
-    response = requests.get(url, timeout=30)
-    print(response.text)
+    main()
