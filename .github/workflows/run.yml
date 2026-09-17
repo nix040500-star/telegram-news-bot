@@ -2,8 +2,8 @@ name: Daily News Auto Summary
 
 on:
   schedule:
-    - cron: '*/30 * * * *'  # 30분마다 자동으로 실행하라는 설정
-  workflow_dispatch:          # 사람이 직접 누르는 수동 실행 버튼도 허용
+    - cron: '*/10 * * * *'  # 10분마다 자동으로 실행되도록 수정
+  workflow_dispatch:
 
 jobs:
   run-python-script:
