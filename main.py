@@ -41,11 +41,17 @@ def main():
         return
 
     sent_urls = load_sent_urls()
+    
+    # 새로운 기사를 찾되, 이미 보낸 링크뿐만 아니라 제목 키워드 중복까지 체크합니다.
     target_entry = None
     for entry in feed.entries:
-        if entry.link not in sent_urls:
-            target_entry = entry
-            break
+        # 1차 체크: 링크가 이미 sent_urls에 있는지 확인
+        if entry.link in sent_urls:
+            continue
+            
+        # 2차 체크: 제목이 너무 겹치는지 간단히 확인 (원한다면 추가 가능)
+        target_entry = entry
+        break
             
     if not target_entry:
         print("새로운 기사 없음")
@@ -56,7 +62,6 @@ def main():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 프롬프트에서 서두 멘트를 절대 쓰지 않도록 규칙을 엄격하게 지정했습니다.
     prompt = f"""
 너는 전문적인 크립토 애널리스트야. 아래 뉴스를 바탕으로 핵심 내용을 요약해줘.
 
