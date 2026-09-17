@@ -3,7 +3,7 @@ import time
 import requests
 import feedparser
 from google import genai
-from google.genai.errors import ServerError
+from google.genai.errors import ServerError, APIError
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -65,11 +65,22 @@ def main():
 링크: {link}
 """
 
-    # 최신 권장 모델인 gemini-3.6-flash로 수정
-    response = client.models.generate_content(
-        model="gemini-3.6-flash",
-        contents=prompt,
-    )
+    # 503 에러(서버 과부하) 발생 시 최대 3번까지 재시도하는 안전 장치 추가
+    max_retries = 3
+    response = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            break
+        except (ServerError, APIError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(5) # 5초 대기 후 재시도
+            else:
+                raise e
 
     if response:
         result_text = response.text
