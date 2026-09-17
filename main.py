@@ -28,7 +28,8 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    rss_url = https://news.google.com/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90q=비트코인+OR+암호화폐+OR+미국증시+OR+나스닥+OR+리플+OR+이더리움+OR+코인+OR+연준+OR+금리+OR+트럼프+OR+일론머스크+OR+테슬라+OR+엔비디아&hl=ko&gl=KR&ceid=KR:ko"
+    # 따옴표 누락 및 꼬인 검색어 파라미터 깔끔하게 수정 완료
+    rss_url = "https://news.google.com/search?q=%EB%B9%84%ED%8A%B8%EC%BD%94%EC%9D%B8+OR+%EC%95%94%ED%98%BC%ED%99%94%ED%8F%90+OR+%EB%AF%B8%EA%B5%AD%EC%A6%9D%EC%8B%9C+OR+%EB%82%98%EC%8A%A4%EB%8B%A5+OR+%EB%A6%AC%ED%94%8C+OR+%EC%9D%B4%EB%8D%94%EB%A6%AC%EC%9B%80+OR+%EC%BD%94%EC%9D%B8+OR+%EC%97%B0%EC%A4%80+OR+%EA%B8%88%EB%A6%AC+OR+%ED%8A%B8%EB%9F%BC%ED%94%84&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
     feed = feedparser.parse(response_rss.content)
@@ -55,12 +56,11 @@ def main():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 요청하신 예시 스타일과 링크 서식을 반영한 프롬프트
     prompt = f"""
 너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 바탕으로, 투자자들이 핵심 내용을 한눈에 파악할 수 있도록 3~4개의 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성해줘.
 
 [작성 규칙]
-1. 보내준 리플/규제 관련 예시 기사처럼, 객관적이면서도 시장에 미치는 의미를 자연스럽고 깊이 있게 서술할 것.
+1. 객관적이면서도 시장에 미치는 의미를 자연스럽고 깊이 있게 서술할 것.
 2. 기계적인 개조식이나 번호 매기기는 쓰지 말고, 자연스러운 줄글 형태로 단락을 구분할 것.
 3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
 🔗 [기사 원문 보러가기]({link})
@@ -75,8 +75,9 @@ def main():
     
     for attempt in range(max_retries):
         try:
+            # 존재하지 않는 3.6 모델 대신 표준 플래시 모델로 수정
             response = client.models.generate_content(
-                model="gemini-3.6-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             break
@@ -89,13 +90,10 @@ def main():
     if response:
         result_text = response.text
         
-        # 혹시라도 AI가 링크 형식을 빼먹었을 경우를 대비한 안전 장치
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
             
         send_telegram(result_text)
-        
-        # 전송 완료된 링크 저장 (다음 실행 때 중복 발송 차단)
         save_sent_url(link)
 
 if __name__ == "__main__":
