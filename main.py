@@ -65,8 +65,9 @@ def main():
 링크: {link}
 """
 
+    # 최신 권장 모델인 gemini-3.6-flash로 수정
     response = client.models.generate_content(
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         contents=prompt,
     )
 
