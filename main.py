@@ -9,22 +9,36 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-SENT_URLS_FILE = "sent_urls.txt"
+SENT_TITLES_FILE = "sent_titles.txt" # 제목 기록용 파일로 변경
 
-def load_sent_urls():
-    if not os.path.exists(SENT_URLS_FILE):
+def load_sent_titles():
+    if not os.path.exists(SENT_TITLES_FILE):
         return set()
-    with open(SENT_URLS_FILE, "r", encoding="utf-8") as f:
+    with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_sent_url(url):
-    with open(SENT_URLS_FILE, "a", encoding="utf-8") as f:
-        f.write(url + "\n")
+def save_sent_title(title):
+    with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
+        f.write(title + "\n")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
     requests.post(url, json=payload)
+
+def is_similar(new_title, sent_titles):
+    """기존에 보낸 제목들과 단어가 너무 많이 겹치는지 간단히 체크하는 함수"""
+    new_words = set(new_title.split())
+    if not new_words:
+        return False
+        
+    for sent in sent_titles:
+        sent_words = set(sent.split())
+        # 겹치는 단어가 4개 이상이거나 전체 단어의 50% 이상이 겹치면 중복으로 판단
+        common_words = new_words.intersection(sent_words)
+        if len(common_words) >= 4 or (len(common_words) / len(new_words) >= 0.5):
+            return True
+    return False
 
 def main():
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
@@ -40,21 +54,20 @@ def main():
         print("수집된 뉴스 없음")
         return
 
-    sent_urls = load_sent_urls()
+    sent_titles = load_sent_titles()
     
-    # 새로운 기사를 찾되, 이미 보낸 링크뿐만 아니라 제목 키워드 중복까지 체크합니다.
     target_entry = None
     for entry in feed.entries:
-        # 1차 체크: 링크가 이미 sent_urls에 있는지 확인
-        if entry.link in sent_urls:
+        title = entry.title
+        # 이미 보낸 제목이거나 비슷한 내용의 기사라면 건너뜀
+        if title in sent_titles or is_similar(title, sent_titles):
             continue
             
-        # 2차 체크: 제목이 너무 겹치는지 간단히 확인 (원한다면 추가 가능)
         target_entry = entry
         break
             
     if not target_entry:
-        print("새로운 기사 없음")
+        print("새로운 기사 없음 (모두 중복)")
         return
 
     title = target_entry.title
@@ -97,7 +110,7 @@ def main():
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
         send_telegram(result_text)
-        save_sent_url(link)
+        save_sent_title(title) # 보낸 제목 기록 저장
 
 if __name__ == "__main__":
     main()
