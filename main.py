@@ -3,6 +3,7 @@ import time
 import requests
 import feedparser
 import subprocess
+from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai.errors import ServerError, APIError
 
@@ -19,7 +20,6 @@ def load_sent_titles():
         return set(line.strip() for line in f if line.strip())
 
 def save_sent_title_and_git_commit(title):
-    """제목을 파일에 저장하고 깃허브에 자동으로 커밋/푸시하여 영구 보존"""
     with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
         f.write(title + "\n")
     
@@ -51,12 +51,12 @@ def is_similar(new_title, sent_titles):
     return False
 
 def main():
-    # 최신 코드로 깃허브 최신 상태 동기화
     try:
         subprocess.run(["git", "pull"], check=True)
     except:
         pass
 
+    # 구글 뉴스 RSS URL (언어 한국어, 최신순 정렬 유도를 위한 파라미터 포함)
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -72,17 +72,31 @@ def main():
 
     sent_titles = load_sent_titles()
     
+    # 현재 시간 (UTC 기준)
+    now_utc = datetime.now(timezone.utc)
+    
     target_entry = None
     for entry in feed.entries:
         title = entry.title
+        
+        # 1. 이미 보낸 뉴스이거나 비슷한 제목이면 패스
         if title in sent_titles or is_similar(title, sent_titles):
             continue
             
+        # 2. 기사 발행 시간 검사 (최근 24시간 이내 기사만 허용)
+        if hasattr(entry, 'published_parsed') and entry.published_parsed:
+            from time import mktime
+            pub_date = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
+            # 현재 시간과 기사 발행 시간의 차이가 24시간 이내인지 확인
+            if (now_utc - pub_date) > timedelta(hours=24):
+                print(f"너무 오래된 기사 스킵: {title}")
+                continue
+                
         target_entry = entry
         break
             
     if not target_entry:
-        print("새로운 기사 없음 (모두 중복)")
+        print("24시간 이내의 새로운 기사 없음")
         return
 
     title = target_entry.title
@@ -91,7 +105,7 @@ def main():
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-너는 전문적인 크립토 애널리스트야. 아래 뉴스를 바탕으로 핵심 내용을 요약해줘.
+너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바탕으로 핵심 내용을 요약해줘.
 
 [엄격한 작성 규칙]
 1. "전문 크립토 애널리스트 시각에서 정리한..." 같은 인사말이나 서두 멘트는 절대 쓰지 말 것. 곧바로 본문 분석 내용부터 시작할 것.
@@ -125,7 +139,7 @@ def main():
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
         send_telegram(result_text)
-        save_sent_title_and_git_commit(title) # 전송 후 깃허브에 기록 영구 저장
+        save_sent_title_and_git_commit(title)
 
 if __name__ == "__main__":
     main()
