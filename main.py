@@ -27,31 +27,33 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    rss_url = "https://news.google.com/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR%3Ako"
+    # 차단 우회 및 안정적인 수집을 위해 네이버 뉴스 검색 RSS(암호화폐)로 변경
+    rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
+    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
     }
+    
     response_rss = requests.get(rss_url, headers=headers)
-
+    
     if response_rss.status_code != 200:
         print(f"에러: RSS 페이지 접근 실패 (상태 코드: {response_rss.status_code})")
         return
 
     feed = feedparser.parse(response_rss.content)
-
+    
     if not feed.entries:
         print("에러: 수집된 뉴스 데이터가 없습니다.")
         return
 
     sent_urls = load_sent_urls()
-
+    
     target_entry = None
     for entry in feed.entries:
         if entry.link not in sent_urls:
             target_entry = entry
             break
-
+            
     if not target_entry:
         print("새로운 기사가 없습니다.")
         return
@@ -60,7 +62,7 @@ def main():
     link = target_entry.link
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-
+    
     prompt = f"""
 너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 바탕으로, 투자자들이 핵심 내용을 한눈에 파악할 수 있도록 3~4개의 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성해줘.
 
@@ -77,7 +79,7 @@ def main():
 
     max_retries = 3
     response = None
-
+    
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -93,10 +95,10 @@ def main():
 
     if response:
         result_text = response.text
-
+        
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-
+            
         send_telegram(result_text)
         save_sent_url(link)
 
