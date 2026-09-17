@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import feedparser
+import subprocess
 from google import genai
 from google.genai.errors import ServerError, APIError
 
@@ -9,7 +10,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-SENT_TITLES_FILE = "sent_titles.txt" # 제목 기록용 파일로 변경
+SENT_TITLES_FILE = "sent_titles.txt"
 
 def load_sent_titles():
     if not os.path.exists(SENT_TITLES_FILE):
@@ -17,9 +18,20 @@ def load_sent_titles():
     with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_sent_title(title):
+def save_sent_title_and_git_commit(title):
+    """제목을 파일에 저장하고 깃허브에 자동으로 커밋/푸시하여 영구 보존"""
     with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
         f.write(title + "\n")
+    
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", SENT_TITLES_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update sent_titles.txt [skip ci]"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("중복 방지 기록 깃허브 저장 완료")
+    except Exception as e:
+        print(f"Git 커밋 중 오류 발생 (무시 가능): {e}")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -27,20 +39,24 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def is_similar(new_title, sent_titles):
-    """기존에 보낸 제목들과 단어가 너무 많이 겹치는지 간단히 체크하는 함수"""
     new_words = set(new_title.split())
     if not new_words:
         return False
         
     for sent in sent_titles:
         sent_words = set(sent.split())
-        # 겹치는 단어가 4개 이상이거나 전체 단어의 50% 이상이 겹치면 중복으로 판단
         common_words = new_words.intersection(sent_words)
         if len(common_words) >= 4 or (len(common_words) / len(new_words) >= 0.5):
             return True
     return False
 
 def main():
+    # 최신 코드로 깃허브 최신 상태 동기화
+    try:
+        subprocess.run(["git", "pull"], check=True)
+    except:
+        pass
+
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -59,7 +75,6 @@ def main():
     target_entry = None
     for entry in feed.entries:
         title = entry.title
-        # 이미 보낸 제목이거나 비슷한 내용의 기사라면 건너뜀
         if title in sent_titles or is_similar(title, sent_titles):
             continue
             
@@ -110,7 +125,7 @@ def main():
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
         send_telegram(result_text)
-        save_sent_title(title) # 보낸 제목 기록 저장
+        save_sent_title_and_git_commit(title) # 전송 후 깃허브에 기록 영구 저장
 
 if __name__ == "__main__":
     main()
