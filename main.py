@@ -27,27 +27,20 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    # 차단 우회 및 안정적인 수집을 위해 네이버 뉴스 검색 RSS(암호화폐)로 변경
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    }
-    
+    headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
     
     if response_rss.status_code != 200:
-        print(f"에러: RSS 페이지 접근 실패 (상태 코드: {response_rss.status_code})")
+        print("RSS 접근 실패")
         return
 
     feed = feedparser.parse(response_rss.content)
-    
     if not feed.entries:
-        print("에러: 수집된 뉴스 데이터가 없습니다.")
+        print("수집된 뉴스 없음")
         return
 
     sent_urls = load_sent_urls()
-    
     target_entry = None
     for entry in feed.entries:
         if entry.link not in sent_urls:
@@ -55,7 +48,7 @@ def main():
             break
             
     if not target_entry:
-        print("새로운 기사가 없습니다.")
+        print("새로운 기사 없음")
         return
 
     title = target_entry.title
@@ -64,41 +57,23 @@ def main():
     client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
-너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 바탕으로, 투자자들이 핵심 내용을 한눈에 파악할 수 있도록 3~4개의 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성해줘.
-
-[작성 규칙]
-1. 객관적이면서도 시장에 미치는 의미를 자연스럽고 깊이 있게 서술할 것.
-2. 기계적인 개조식이나 번호 매기기는 쓰지 말고, 자연스러운 줄글 형태로 단락을 구분할 것.
-3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
+너는 전문적인 크립토 애널리스트야. 아래 뉴스를 바탕으로 핵심 내용을 3개 단락으로 요약해줘.
+마지막 줄에는 반드시 아래 링크를 포함할 것:
 🔗 [기사 원문 보러가기]({link})
 
-[대상 기사]
 제목: {title}
 링크: {link}
 """
 
-    max_retries = 3
-    response = None
-    
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-            )
-            break
-        except ServerError as e:
-            if attempt < max_retries - 1:
-                time.sleep(5)
-            else:
-                raise e
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
 
     if response:
         result_text = response.text
-        
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-            
         send_telegram(result_text)
         save_sent_url(link)
 
