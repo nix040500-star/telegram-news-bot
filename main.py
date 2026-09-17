@@ -9,7 +9,6 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 이미 보낸 기사 링크를 기록할 파일 (중복 발송 방지용)
 SENT_URLS_FILE = "sent_urls.txt"
 
 def load_sent_urls():
@@ -28,25 +27,31 @@ def send_telegram(text):
     requests.post(url, json=payload)
 
 def main():
-    # 따옴표 누락 및 꼬인 검색어 파라미터 깔끔하게 수정 완료
-    rss_url = "https://news.google.com/search?q=%EB%B9%84%ED%8A%B8%EC%BD%94%EC%9D%B8+OR+%EC%95%94%ED%98%BC%ED%99%94%ED%8F%90+OR+%EB%AF%B8%EA%B5%AD%EC%A6%9D%EC%8B%9C+OR+%EB%82%98%EC%8A%A4%EB%8B%A5+OR+%EB%A6%AC%ED%94%8C+OR+%EC%9D%B4%EB%8D%94%EB%A6%AC%EC%9B%80+OR+%EC%BD%94%EC%9D%B8+OR+%EC%97%B0%EC%A4%80+OR+%EA%B8%88%EB%A6%AC+OR+%ED%8A%B8%EB%9F%BC%ED%94%84&hl=ko&gl=KR&ceid=KR:ko"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    rss_url = "https://news.google.com/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR%3Ako"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+    }
     response_rss = requests.get(rss_url, headers=headers)
+
+    if response_rss.status_code != 200:
+        print(f"에러: RSS 페이지 접근 실패 (상태 코드: {response_rss.status_code})")
+        return
+
     feed = feedparser.parse(response_rss.content)
-    
+
     if not feed.entries:
         print("에러: 수집된 뉴스 데이터가 없습니다.")
         return
 
     sent_urls = load_sent_urls()
-    
-    # 아직 전송하지 않은 가장 최신 기사 1개만 타겟팅
+
     target_entry = None
     for entry in feed.entries:
         if entry.link not in sent_urls:
             target_entry = entry
             break
-            
+
     if not target_entry:
         print("새로운 기사가 없습니다.")
         return
@@ -55,7 +60,7 @@ def main():
     link = target_entry.link
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    
+
     prompt = f"""
 너는 전문적인 금융·크립토 애널리스트야. 아래 제공되는 단 하나의 뉴스 기사를 바탕으로, 투자자들이 핵심 내용을 한눈에 파악할 수 있도록 3~4개의 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성해줘.
 
@@ -72,10 +77,9 @@ def main():
 
     max_retries = 3
     response = None
-    
+
     for attempt in range(max_retries):
         try:
-            # 존재하지 않는 3.6 모델 대신 표준 플래시 모델로 수정
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=prompt,
@@ -89,10 +93,10 @@ def main():
 
     if response:
         result_text = response.text
-        
+
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-            
+
         send_telegram(result_text)
         save_sent_url(link)
 
