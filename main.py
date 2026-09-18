@@ -2,7 +2,6 @@ import os
 import time
 import requests
 import feedparser
-import subprocess
 from google import genai
 from google.genai.errors import ServerError, APIError
 
@@ -18,19 +17,9 @@ def load_sent_titles():
     with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
         return set(line.strip() for line in f if line.strip())
 
-def save_sent_title_and_git_commit(title):
+def save_sent_title(title):
     with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
         f.write(title + "\n")
-    
-    try:
-        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
-        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
-        subprocess.run(["git", "add", SENT_TITLES_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Update sent_titles.txt [skip ci]"], check=True)
-        subprocess.run(["git", "push"], check=True)
-        print("중복 방지 기록 깃허브 저장 완료")
-    except Exception as e:
-        print(f"Git 커밋 중 오류 발생 (무시 가능): {e}")
 
 def send_telegram(text):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -50,11 +39,6 @@ def is_similar(new_title, sent_titles):
     return False
 
 def main():
-    try:
-        subprocess.run(["git", "pull"], check=True)
-    except:
-        pass
-
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -109,8 +93,9 @@ def main():
     
     for attempt in range(max_retries):
         try:
+            # 안정적인 표준 모델명으로 변경
             response = client.models.generate_content(
-                model="gemini-3.6-flash",
+                model="gemini-1.5-flash",
                 contents=prompt,
             )
             break
@@ -125,7 +110,7 @@ def main():
         if "[기사 원문 보러가기]" not in result_text:
             result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
         send_telegram(result_text)
-        save_sent_title_and_git_commit(title)
+        save_sent_title(title)
 
 if __name__ == "__main__":
     main()
