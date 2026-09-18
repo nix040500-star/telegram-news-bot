@@ -3,8 +3,7 @@ import time
 import traceback
 import requests
 import feedparser
-from google import genai
-from google.genai.errors import ServerError, APIError
+import google.generativeai as genai
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -91,7 +90,7 @@ def main():
         print(f"선택된 뉴스 제목: {title}")
 
         print("2. Gemini AI 요약 생성 시작...")
-        client = genai.Client(api_key=GEMINI_API_KEY)
+        genai.configure(api_key=GEMINI_API_KEY)
         
         prompt = f"""
 너는 감각 있고 트렌디한 크립토 전문 텔레그램 채널 운영자야. 아래 최신 뉴스를 바탕으로 핵심만 짚어서 요약해줘.
@@ -108,11 +107,9 @@ def main():
 링크: {link}
 """
 
-        # 에러 로그에서 권장하는 최신 모델로 변경 완료
-        response = client.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=prompt,
-        )
+        # 가장 안정적이고 호환성이 높은 표준 모델 지정
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(prompt)
 
         if response and response.text:
             result_text = response.text
