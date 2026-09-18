@@ -1,4 +1,4 @@
-name: run.yml
+name: Crypto News Bot
 
 on:
   workflow_dispatch:
