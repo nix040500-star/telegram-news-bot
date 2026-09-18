@@ -1,27 +1,28 @@
-name: Daily News Auto Summary
+name: run.yml
 
 on:
-  schedule:
-    - cron: '*/10 * * * *'  # 10분마다 자동으로 실행되도록 수정
   workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *' # 10분마다 주기적으로 자동 실행
 
 jobs:
   run-python-script:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: 소스코드 체크아웃
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: 파이썬 설정
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
+      - name: 필수 라이브러리 설치
         run: |
-          pip install requests feedparser google-genai
+          python -m pip install --upgrade pip
+          pip install google-genai feedparser requests
 
-      - name: Run script
+      - name: 봇 실행
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
