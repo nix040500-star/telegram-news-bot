@@ -7,7 +7,7 @@ import requests
 import feedparser
 import urllib.parse
 import email.utils
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from google import genai
 
@@ -16,6 +16,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 SENT_FILE = "sent_urls.txt"
+MAX_ARTICLE_AGE_HOURS = 1
 
 HEADERS = {
     "User-Agent": (
@@ -339,6 +340,7 @@ def main():
         return
 
     sent_items = load_sent_items()
+    now = datetime.now(timezone.utc)
     all_entries = fetch_all_entries()
     print(f"\n📦 전체 후보: {len(all_entries)}개")
     print(f"📚 기존 중복 기록: {len(sent_items)}개")
@@ -351,8 +353,15 @@ def main():
     current_titles = []
 
     for item in all_entries:
-        # 발행시간으로 제외하지 않는다.
-        # 현재 피드에 잡힌 기사 중 아직 보내지 않은 기사만 전송한다.
+        # 오래된 미전송 기사가 갑자기 올라오는 것을 막는다.
+        # RSS/Google News 표시시간 차이를 고려해 최근 1시간까지만 허용한다.
+        age = now - item["published"]
+        if age.total_seconds() < -300:
+            continue
+        if age > timedelta(hours=MAX_ARTICLE_AGE_HOURS):
+            print("⏭️ 오래된 기사 제외:", item["published"].isoformat(), item["title"])
+            continue
+
         feed_url = item["feed_url"]
         guid_key = item["guid_key"]
         title_key = item["title_key"]
