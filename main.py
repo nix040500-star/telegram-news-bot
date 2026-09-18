@@ -1,23 +1,22 @@
 import os
 import re
+import hashlib
 import traceback
 import requests
 import feedparser
 import urllib.parse
 import email.utils
 from datetime import datetime, timezone, timedelta
+from difflib import SequenceMatcher
 from google import genai
-
-
-# =========================================================
-# 환경변수
-# =========================================================
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 SENT_FILE = "sent_urls.txt"
+LOOKBACK_HOURS = 12
+MAX_ARTICLES_PER_RUN = 20
 
 HEADERS = {
     "User-Agent": (
@@ -27,890 +26,492 @@ HEADERS = {
     )
 }
 
+CRYPTO_TERMS = [
+    "crypto", "cryptocurrency", "bitcoin", "btc", "ethereum", "eth",
+    "xrp", "ripple", "dogecoin", "doge", "stablecoin", "usdt",
+    "tether", "coinbase", "binance", "blockchain", "digital asset",
+    "token", "코인", "암호화폐", "가상자산", "비트코인", "이더리움",
+    "리플", "도지코인", "도지", "스테이블코인"
+]
 
-# =========================================================
-# 중복 기록 불러오기
-# =========================================================
+MACRO_TERMS = [
+    "federal reserve", "fed", "fomc", "powell", "interest rate",
+    "rate hike", "rate cut", "inflation", "sec", "etf",
+    "연준", "파월", "금리", "인플레이션"
+]
+
+GOOGLE_QUERY = (
+    '("코인" OR "암호화폐" OR "가상자산" OR "비트코인" OR BTC OR '
+    '"이더리움" OR ETH OR "리플" OR XRP OR "도지코인" OR DOGE OR '
+    '"스테이블코인" OR USDT OR ETF OR SEC OR "연준" OR Fed OR '
+    'FOMC OR "연준 의장" OR "금리" OR "파월") when:1d'
+)
+
+google_rss = (
+    "https://news.google.com/rss/search?"
+    f"q={urllib.parse.quote(GOOGLE_QUERY)}"
+    "&hl=ko&gl=KR&ceid=KR:ko"
+)
+
+FEEDS = [
+    ("Google News KR", google_rss, "google"),
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", "crypto"),
+    ("Cointelegraph", "https://cointelegraph.com/rss", "crypto"),
+    ("Decrypt", "https://decrypt.co/feed", "crypto"),
+    ("Federal Reserve - Monetary Policy", "https://www.federalreserve.gov/feeds/press_monetary.xml", "macro"),
+    ("Federal Reserve - Speeches", "https://www.federalreserve.gov/feeds/speeches.xml", "macro"),
+]
+
 
 def load_sent_items():
-
     if not os.path.exists(SENT_FILE):
         return set()
-
     try:
-
-        with open(
-            SENT_FILE,
-            "r",
-            encoding="utf-8"
-        ) as f:
-
-            return {
-                line.strip()
-                for line in f
-                if line.strip()
-            }
-
+        with open(SENT_FILE, "r", encoding="utf-8") as f:
+            return {line.strip() for line in f if line.strip()}
     except Exception as e:
-
-        print(
-            "⚠️ 전송 기록 읽기 실패:",
-            e
-        )
-
+        print("⚠️ 전송 기록 읽기 실패:", e)
         return set()
 
 
-# =========================================================
-# 중복 기록 저장
-# =========================================================
-
-def save_sent_item(item):
-
-    if not item:
+def save_sent_items(items):
+    items = [x.strip() for x in items if x and x.strip()]
+    if not items:
         return
-
-    item = item.strip()
-
-    if not item:
-        return
-
-    with open(
-        SENT_FILE,
-        "a",
-        encoding="utf-8"
-    ) as f:
-
-        f.write(
-            item + "\n"
-        )
+    with open(SENT_FILE, "a", encoding="utf-8") as f:
+        for item in items:
+            f.write(item + "\n")
 
 
-# =========================================================
-# 기사 제목 정규화
-#
-# 같은 제목인데 공백/특수문자/대소문자 차이 때문에
-# 중복으로 인식하지 못하는 문제 방지
-# =========================================================
-
-def normalize_title(title):
-
-    if not title:
-        return ""
-
-    title = title.lower()
-
-    # Google News 제목 뒤 언론사 제거를 어느 정도 보조
-    title = re.sub(
-        r"\s+",
-        " ",
-        title
-    )
-
-    # 한글 / 영문 / 숫자만 남김
-    title = re.sub(
-        r"[^가-힣a-z0-9]",
-        "",
-        title
-    )
-
+def strip_source_suffix(title):
+    title = (title or "").strip()
+    # Google News often appends publisher name after " - "
+    parts = re.split(r"\s+-\s+", title)
+    if len(parts) > 1 and len(parts[-1]) <= 40:
+        title = " - ".join(parts[:-1])
     return title.strip()
 
 
-# =========================================================
-# 제목 중복 확인용 KEY 생성
-# =========================================================
+def normalize_title(title):
+    title = strip_source_suffix(title).lower()
+    title = re.sub(r"https?://\S+", "", title)
+    title = re.sub(r"[^가-힣a-z0-9]+", " ", title)
+    return re.sub(r"\s+", " ", title).strip()
+
 
 def make_title_key(title):
-
-    normalized = normalize_title(
-        title
-    )
-
+    normalized = normalize_title(title)
     if not normalized:
         return ""
-
-    return (
-        "TITLE:"
-        + normalized
-    )
+    digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return "TITLE:" + digest
 
 
-# =========================================================
-# Google News → 실제 기사 URL 확인
-# =========================================================
+def make_guid_key(entry):
+    guid = entry.get("id") or entry.get("guid") or ""
+    guid = str(guid).strip()
+    return "GUID:" + guid if guid else ""
 
-def resolve_article_url(entry):
 
-    google_link = entry.link
-
+def canonicalize_url(url):
+    if not url:
+        return ""
     try:
+        p = urllib.parse.urlsplit(url.strip())
+        query = urllib.parse.parse_qsl(p.query, keep_blank_values=True)
+        tracking = {
+            "utm_source", "utm_medium", "utm_campaign", "utm_term",
+            "utm_content", "utm_id", "gclid", "fbclid", "mc_cid", "mc_eid"
+        }
+        query = [(k, v) for k, v in query if k.lower() not in tracking]
+        clean_query = urllib.parse.urlencode(query, doseq=True)
+        return urllib.parse.urlunsplit(
+            (p.scheme.lower(), p.netloc.lower(), p.path.rstrip("/"), clean_query, "")
+        )
+    except Exception:
+        return url.strip()
 
-        response = requests.get(
-            google_link,
+
+def parse_date(entry):
+    candidates = [
+        entry.get("published"),
+        entry.get("updated"),
+        entry.get("created"),
+    ]
+    for value in candidates:
+        if not value:
+            continue
+        try:
+            dt = email.utils.parsedate_to_datetime(value)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            return dt.astimezone(timezone.utc)
+        except Exception:
+            pass
+
+    for key in ("published_parsed", "updated_parsed", "created_parsed"):
+        value = entry.get(key)
+        if value:
+            try:
+                return datetime(
+                    value.tm_year, value.tm_mon, value.tm_mday,
+                    value.tm_hour, value.tm_min, value.tm_sec,
+                    tzinfo=timezone.utc
+                )
+            except Exception:
+                pass
+
+    return None
+
+
+def resolve_url(url):
+    if not url:
+        return ""
+    try:
+        r = requests.get(
+            url,
             headers=HEADERS,
-            timeout=15,
+            timeout=12,
             allow_redirects=True
         )
-
-        final_url = response.url
-
-        if (
-            final_url
-            and final_url.startswith("http")
-            and "news.google.com"
-            not in final_url
-        ):
-
+        final_url = canonicalize_url(r.url)
+        if final_url.startswith("http"):
             return final_url
-
     except Exception as e:
+        print("⚠️ URL 확인 실패:", e)
+    return canonicalize_url(url)
 
-        print(
-            "⚠️ 실제 기사 URL 확인 실패:",
-            e
+
+def is_relevant(title, summary, feed_type):
+    text = f"{title} {summary}".lower()
+
+    if feed_type in ("crypto", "google"):
+        return any(term.lower() in text for term in CRYPTO_TERMS + MACRO_TERMS)
+
+    if feed_type == "macro":
+        # Fed feed: only send crypto-relevant policy news or major monetary-policy items.
+        crypto_hit = any(term.lower() in text for term in CRYPTO_TERMS)
+        major_macro = any(
+            term in text
+            for term in [
+                "fomc", "federal funds", "interest rate", "monetary policy",
+                "powell", "inflation", "rate", "digital asset",
+                "crypto", "stablecoin"
+            ]
         )
+        return crypto_hit or major_macro
 
-    # 실패하면 Google News 해당 기사 주소 사용
-    return google_link
-
-
-# =========================================================
-# 뉴스 발행시간
-# =========================================================
-
-def get_date(entry):
-
-    try:
-
-        date = (
-            email.utils
-            .parsedate_to_datetime(
-                entry.published
-            )
-        )
-
-        if date.tzinfo is None:
-
-            date = date.replace(
-                tzinfo=timezone.utc
-            )
-
-        return date.astimezone(
-            timezone.utc
-        )
-
-    except Exception:
-
-        return datetime.min.replace(
-            tzinfo=timezone.utc
-        )
+    return True
 
 
-# =========================================================
-# Gemini가 혹시 링크를 만들어도 제거
-# =========================================================
+def titles_are_same(a, b):
+    a = normalize_title(a)
+    b = normalize_title(b)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+
+    ratio = SequenceMatcher(None, a, b).ratio()
+    if ratio >= 0.90:
+        return True
+
+    aw = set(a.split())
+    bw = set(b.split())
+    if not aw or not bw:
+        return False
+    overlap = len(aw & bw) / max(1, min(len(aw), len(bw)))
+    return overlap >= 0.88 and min(len(aw), len(bw)) >= 5
+
 
 def clean_gemini_text(text):
-
     if not text:
         return ""
-
     text = text.strip()
-
-    # Gemini가 기사 링크를 임의로 생성한 경우 제거
     text = re.sub(
-        r"\n*🔗\s*"
-        r"\[기사 원문 보러가기\]"
-        r"\([^)]+\)",
+        r"\n*🔗\s*\[기사 원문 보러가기\]\([^)]+\)",
         "",
         text
     )
-
+    text = re.sub(r"\n*https?://\S+\s*$", "", text)
     return text.strip()
 
 
-# =========================================================
-# Telegram 전송
-# =========================================================
+def escape_markdown_url(url):
+    return url.replace("(", "%28").replace(")", "%29")
+
 
 def send_telegram(text):
-
-    if not TELEGRAM_TOKEN:
-
-        print(
-            "❌ TELEGRAM_TOKEN 없음"
-        )
-
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        print("❌ Telegram 환경변수 없음")
         return False
 
-    if not TELEGRAM_CHAT_ID:
-
-        print(
-            "❌ TELEGRAM_CHAT_ID 없음"
-        )
-
-        return False
-
-    telegram_url = (
-        "https://api.telegram.org/"
-        f"bot{TELEGRAM_TOKEN}/"
-        "sendMessage"
-    )
-
+    api_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": text,
         "parse_mode": "Markdown",
-        "disable_web_page_preview": False
+        "disable_web_page_preview": False,
     }
 
     try:
+        r = requests.post(api_url, json=payload, timeout=30)
+        print("📡 Telegram:", r.status_code)
+        if r.status_code == 200:
+            return True
 
-        response = requests.post(
-            telegram_url,
-            json=payload,
-            timeout=30
-        )
-
-        print(
-            "📡 Telegram 응답:",
-            response.status_code
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "❌ Telegram 오류:"
-            )
-
-            print(
-                response.text
-            )
-
+        # Markdown special chars in AI output can occasionally break Telegram parsing.
+        print("⚠️ Markdown 전송 실패, 일반 텍스트로 재시도:", r.text)
+        payload.pop("parse_mode", None)
+        r = requests.post(api_url, json=payload, timeout=30)
+        print("📡 Telegram 재시도:", r.status_code)
+        if r.status_code != 200:
+            print("❌ Telegram 오류:", r.text)
             return False
-
         return True
-
     except Exception as e:
-
-        print(
-            "❌ Telegram 요청 오류:",
-            e
-        )
-
+        print("❌ Telegram 요청 오류:", e)
         return False
 
 
-# =========================================================
-# MAIN
-# =========================================================
+def fetch_all_entries():
+    collected = []
+
+    for source, feed_url, feed_type in FEEDS:
+        print(f"\n🔎 {source} 확인 중...")
+
+        try:
+            r = requests.get(feed_url, headers=HEADERS, timeout=20)
+            if r.status_code != 200:
+                print(f"❌ {source} HTTP {r.status_code}")
+                continue
+
+            feed = feedparser.parse(r.content)
+            if getattr(feed, "bozo", False):
+                print(f"⚠️ {source} RSS 경고:", getattr(feed, "bozo_exception", ""))
+
+            entries = list(feed.entries or [])
+            print(f"📰 {source}: {len(entries)}개")
+
+            for entry in entries:
+                title = str(entry.get("title", "")).strip()
+                link = str(entry.get("link", "")).strip()
+                summary = str(entry.get("summary", "") or entry.get("description", "")).strip()
+                published = parse_date(entry)
+
+                if not title or not link or not published:
+                    continue
+
+                if not is_relevant(title, summary, feed_type):
+                    continue
+
+                collected.append({
+                    "source": source,
+                    "feed_type": feed_type,
+                    "entry": entry,
+                    "title": title,
+                    "summary": summary,
+                    "feed_url": canonicalize_url(link),
+                    "published": published,
+                    "guid_key": make_guid_key(entry),
+                    "title_key": make_title_key(title),
+                })
+
+        except Exception as e:
+            print(f"❌ {source} 수집 오류:", e)
+            continue
+
+    return collected
+
 
 def main():
-
-    print("")
-    print(
-        "======================================"
-    )
-    print(
-        "🚀 크립토 최신 뉴스 봇 실행"
-    )
-    print(
-        "======================================"
-    )
-
-    try:
-
-        # =================================================
-        # 환경변수 확인
-        # =================================================
-
-        if not GEMINI_API_KEY:
-
-            print(
-                "❌ GEMINI_API_KEY 없음"
-            )
-
-            return
-
-        if not TELEGRAM_TOKEN:
-
-            print(
-                "❌ TELEGRAM_TOKEN 없음"
-            )
-
-            return
-
-        if not TELEGRAM_CHAT_ID:
-
-            print(
-                "❌ TELEGRAM_CHAT_ID 없음"
-            )
-
-            return
-
-
-        # =================================================
-        # 1. Google News 검색
-        # =================================================
-
-        query = (
-            "코인 OR 암호화폐 OR 가상자산 OR "
-            "비트코인 OR BTC OR 이더리움 OR ETH OR "
-            "리플 OR XRP OR 도지코인 OR 도지 OR DOGE OR "
-            "스테이블코인 OR USDT OR ETF OR SEC OR "
-            "연준 OR Fed OR FOMC OR 연준 의장 OR 금리 OR 파월"
-        )
-
-        keyword = urllib.parse.quote(
-            query
-        )
-
-        rss_url = (
-            "https://news.google.com/"
-            "rss/search?"
-            f"q={keyword}"
-            "&hl=ko"
-            "&gl=KR"
-            "&ceid=KR:ko"
-        )
-
-        print("")
-        print(
-            "🔎 Google News 확인 중..."
-        )
-
-        response = requests.get(
-            rss_url,
-            headers=HEADERS,
-            timeout=20
-        )
-
-        if response.status_code != 200:
-
-            print(
-                "❌ RSS 접근 실패:",
-                response.status_code
-            )
-
-            return
-
-        feed = feedparser.parse(
-            response.content
-        )
-
-        if not feed.entries:
-
-            print(
-                "❌ 검색된 뉴스가 없습니다."
-            )
-
-            return
-
-        print(
-            f"📰 검색 결과: "
-            f"{len(feed.entries)}개"
-        )
-
-
-        # =================================================
-        # 2. 최신순 정렬
-        # =================================================
-
-        entries = sorted(
-            feed.entries,
-            key=get_date,
-            reverse=True
-        )
-
-        sent_items = load_sent_items()
-
-        print(
-            f"📚 기존 중복 기록: "
-            f"{len(sent_items)}개"
-        )
-
-        now = datetime.now(
-            timezone.utc
-        )
-
-
-        # =================================================
-        # 3. 새 기사 전부 찾기
-        # =================================================
-
-        new_entries = []
-
-        # 이번 실행 중 발견한 제목도 따로 관리
-        current_titles = set()
-
-        for entry in entries:
-
-            published = get_date(
-                entry
-            )
-
-            # 날짜 없는 기사 제외
-            if published.year == 1:
-                continue
-
-            age = (
-                now - published
-            )
-
-            # 미래 시간 오류 제외
-            if age.total_seconds() < 0:
-                continue
-
-            # -------------------------------------------------
-            # 최근 6시간 기사만 확인
-            #
-            # 5분마다 실행되더라도
-            # GitHub Actions 지연/실패가 발생했을 때
-            # 놓친 뉴스를 다시 잡기 위한 안전 범위
-            # -------------------------------------------------
-
-            if age > timedelta(
-                hours=6
-            ):
-                continue
-
-
-            google_url = entry.link
-
-            title_key = make_title_key(
-                entry.title
-            )
-
-
-            # =================================================
-            # 중복 검사 1
-            # Google News URL
-            # =================================================
-
-            if google_url in sent_items:
-
-                print(
-                    "⏭️ Google URL 중복:",
-                    entry.title
-                )
-
-                continue
-
-
-            # =================================================
-            # 중복 검사 2
-            # 제목
-            # =================================================
-
-            if (
-                title_key
-                and title_key in sent_items
-            ):
-
-                print(
-                    "⏭️ 제목 중복:",
-                    entry.title
-                )
-
-                continue
-
-
-            # =================================================
-            # 중복 검사 3
-            # 이번 실행에서 이미 발견한 제목
-            # =================================================
-
-            if (
-                title_key
-                and title_key in current_titles
-            ):
-
-                print(
-                    "⏭️ 실행 내 제목 중복:",
-                    entry.title
-                )
-
-                continue
-
-
-            # =================================================
-            # 실제 기사 URL 확인
-            # =================================================
-
-            article_url = (
-                resolve_article_url(
-                    entry
-                )
-            )
-
-
-            # =================================================
-            # 중복 검사 4
-            # 실제 기사 URL
-            # =================================================
-
-            if article_url in sent_items:
-
-                print(
-                    "⏭️ 실제 URL 중복:",
-                    entry.title
-                )
-
-                continue
-
-
-            # =================================================
-            # 새 기사 등록
-            # =================================================
-
-            new_entries.append(
-                {
-                    "entry": entry,
-                    "link": article_url,
-                    "published": published,
-                    "title_key": title_key
-                }
-            )
-
-            if title_key:
-
-                current_titles.add(
-                    title_key
-                )
-
-
-        # =================================================
-        # 새 뉴스 없음
-        # =================================================
-
-        if not new_entries:
-
-            print("")
-            print(
-                "✅ 새로 보낼 코인 뉴스가 없습니다."
-            )
-
-            return
-
-
-        print("")
-        print(
-            f"🔥 새 뉴스 "
-            f"{len(new_entries)}개 발견"
-        )
-
-
-        # =================================================
-        # 오래된 기사부터 순서대로 전송
-        # =================================================
-
-        new_entries.sort(
-            key=lambda x:
-            x["published"]
-        )
-
-
-        # =================================================
-        # Gemini 준비
-        # =================================================
-
-        client = genai.Client(
-            api_key=GEMINI_API_KEY
-        )
-
-        success_count = 0
-        fail_count = 0
-
-
-        # =================================================
-        # 4. 모든 새 기사 처리
-        # =================================================
-
-        for index, item in enumerate(
-            new_entries,
-            start=1
-        ):
-
-            target_entry = (
-                item["entry"]
-            )
-
-            title = (
-                target_entry.title
-            )
-
-            link = (
-                item["link"]
-            )
-
-            published = (
-                item["published"]
-            )
-
-            title_key = (
-                item["title_key"]
-            )
-
-            print("")
-            print(
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            )
-
-            print(
-                f"📰 {index}/"
-                f"{len(new_entries)} 처리"
-            )
-
-            print(
-                "제목:",
-                title
-            )
-
-            print(
-                "발행:",
-                published.isoformat()
-            )
-
-            print(
-                "링크:",
-                link
-            )
-
-
-            # =================================================
-            # Gemini 프롬프트
-            # =================================================
-
-            prompt = f"""
-너는 암호화폐 뉴스 전문 요약 에디터다.
-
-아래 뉴스를 모바일 텔레그램에서
-빠르게 읽을 수 있도록 짧고 정확하게 요약한다.
-
-[작성 규칙]
-
-- 인사말 없이 바로 뉴스 내용부터 시작한다.
-- 본문은 짧은 2문단으로 작성한다.
-- 각 문단은 너무 길게 작성하지 않는다.
-- 모바일 화면에서 읽기 편하게 작성한다.
-- 어려운 암호화폐 전문용어는 쉽게 설명한다.
-- 불필요한 배경 설명은 제거한다.
+    print("\n======================================")
+    print("🚀 MULTI-SOURCE CRYPTO NEWS BOT")
+    print("======================================")
+
+    if not GEMINI_API_KEY:
+        print("❌ GEMINI_API_KEY 없음")
+        return
+    if not TELEGRAM_TOKEN:
+        print("❌ TELEGRAM_TOKEN 없음")
+        return
+    if not TELEGRAM_CHAT_ID:
+        print("❌ TELEGRAM_CHAT_ID 없음")
+        return
+
+    sent_items = load_sent_items()
+    now = datetime.now(timezone.utc)
+
+    all_entries = fetch_all_entries()
+    print(f"\n📦 전체 후보: {len(all_entries)}개")
+    print(f"📚 기존 중복 기록: {len(sent_items)}개")
+
+    all_entries.sort(key=lambda x: x["published"])
+
+    new_entries = []
+    current_urls = set()
+    current_guids = set()
+    current_titles = []
+
+    for item in all_entries:
+        age = now - item["published"]
+
+        if age.total_seconds() < -300:
+            continue
+        if age > timedelta(hours=LOOKBACK_HOURS):
+            continue
+
+        feed_url = item["feed_url"]
+        guid_key = item["guid_key"]
+        title_key = item["title_key"]
+
+        if feed_url and feed_url in sent_items:
+            print("⏭️ URL 중복:", item["title"])
+            continue
+        if guid_key and guid_key in sent_items:
+            print("⏭️ GUID 중복:", item["title"])
+            continue
+        if title_key and title_key in sent_items:
+            print("⏭️ 제목 중복:", item["title"])
+            continue
+
+        if feed_url and feed_url in current_urls:
+            continue
+        if guid_key and guid_key in current_guids:
+            continue
+        if any(titles_are_same(item["title"], old) for old in current_titles):
+            print("⏭️ 다른 소스 동일/유사 기사:", item["title"])
+            continue
+
+        # Resolve only after cheap duplicate checks.
+        final_url = resolve_url(feed_url)
+        if final_url and final_url in sent_items:
+            print("⏭️ 최종 URL 중복:", item["title"])
+            continue
+        if final_url and final_url in current_urls:
+            continue
+
+        item["final_url"] = final_url or feed_url
+        new_entries.append(item)
+
+        if feed_url:
+            current_urls.add(feed_url)
+        if final_url:
+            current_urls.add(final_url)
+        if guid_key:
+            current_guids.add(guid_key)
+        current_titles.append(item["title"])
+
+    if not new_entries:
+        print("\n✅ 새로 보낼 뉴스가 없습니다.")
+        return
+
+    # Avoid a flood if the bot was offline and suddenly catches up.
+    new_entries = new_entries[-MAX_ARTICLES_PER_RUN:]
+    print(f"\n🔥 새 뉴스 {len(new_entries)}개 전송 시작")
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    success_count = 0
+    fail_count = 0
+
+    for index, item in enumerate(new_entries, 1):
+        title = item["title"]
+        summary = re.sub(r"<[^>]+>", " ", item["summary"])
+        summary = re.sub(r"\s+", " ", summary).strip()
+        source = item["source"]
+        link = item["final_url"]
+
+        print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        print(f"📰 {index}/{len(new_entries)} | {source}")
+        print("제목:", title)
+        print("발행:", item["published"].isoformat())
+        print("링크:", link)
+
+        prompt = f"""
+너는 암호화폐·금융 뉴스 전문 요약 에디터다.
+
+아래 RSS 기사 정보를 한국어로 요약한다.
+
+[규칙]
+- 인사말 없이 바로 시작한다.
+- 모바일 텔레그램에서 빠르게 읽을 수 있도록 짧은 2문단으로 작성한다.
+- 기사 제목과 RSS 요약에 실제로 들어있는 정보만 사용한다.
+- 없는 사실, 수치, 인용, 배경을 만들지 않는다.
+- 영어 기사도 자연스러운 한국어로 번역·요약한다.
+- 전문용어는 쉽게 풀어쓴다.
 - 같은 내용을 반복하지 않는다.
-- 기사 제목에서 확인할 수 없는 사실은 임의로 만들지 않는다.
-- 추측하지 않는다.
-- 투자 권유를 하지 않는다.
-- 중요한 코인명, 기업명, 인물명, 수치는 유지한다.
-- 과도한 이모티콘은 사용하지 않는다.
+- 투자 권유나 가격 예측을 하지 않는다.
+- 코인명, 기업명, 인물명, 중요한 수치는 유지한다.
+- 연준·SEC·정부·정책 관련 내용은 사실 중심으로 중립적으로 작성한다.
+- URL은 절대로 작성하지 않는다.
+- '기사 원문 보러가기' 문구도 작성하지 않는다.
 
-마지막에는 반드시 아래 형식으로 작성한다.
-
+마지막 형식:
 📌 짧게 말씀드리면..
 기사 전체 핵심을 한 문장으로 요약한다.
 
-[매우 중요]
+[출처]
+{source}
 
-기사 URL은 절대로 작성하지 않는다.
-기사 URL을 추측하지 않는다.
-'기사 원문 보러가기' 문구를 작성하지 않는다.
-링크는 Python 프로그램이 별도로 추가한다.
-
-[뉴스 제목]
-
+[기사 제목]
 {title}
+
+[RSS 요약]
+{summary[:3500]}
 """
 
+        try:
+            print("🤖 Gemini 요약 생성 중...")
+            result = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt
+            )
 
-            # =================================================
-            # Gemini 실행
-            # =================================================
-
-            try:
-
-                print(
-                    "🤖 Gemini 요약 생성 중..."
-                )
-
-                result = (
-                    client.models
-                    .generate_content(
-                        model="gemini-3.6-flash",
-                        contents=prompt
-                    )
-                )
-
-
-                if (
-                    not result
-                    or not result.text
-                ):
-
-                    print(
-                        "❌ Gemini 응답 없음"
-                    )
-
-                    fail_count += 1
-
-                    continue
-
-
-                text = clean_gemini_text(
-                    result.text
-                )
-
-
-                if not text:
-
-                    print(
-                        "❌ Gemini 요약 없음"
-                    )
-
-                    fail_count += 1
-
-                    continue
-
-
-                # =================================================
-                # 정확한 기사 URL 직접 추가
-                # =================================================
-
-                text += (
-                    "\n\n"
-                    f"🔗 [기사 원문 보러가기]"
-                    f"({link})"
-                )
-
-
-                # =================================================
-                # Telegram 전송
-                # =================================================
-
-                if not send_telegram(
-                    text
-                ):
-
-                    print(
-                        "❌ Telegram 전송 실패"
-                    )
-
-                    fail_count += 1
-
-                    # 실패한 뉴스는 저장하지 않음
-                    # 다음 실행에서 다시 시도
-                    continue
-
-
-                # =================================================
-                # 전송 성공
-                # =================================================
-
-                print(
-                    "✅ Telegram 전송 성공"
-                )
-
-                success_count += 1
-
-
-                # =================================================
-                # 5. 중복 기록 저장
-                # =================================================
-
-                # 실제 기사 URL
-                save_sent_item(
-                    link
-                )
-
-                sent_items.add(
-                    link
-                )
-
-
-                # Google News URL
-                if target_entry.link:
-
-                    save_sent_item(
-                        target_entry.link
-                    )
-
-                    sent_items.add(
-                        target_entry.link
-                    )
-
-
-                # 정규화 제목
-                if title_key:
-
-                    save_sent_item(
-                        title_key
-                    )
-
-                    sent_items.add(
-                        title_key
-                    )
-
-
-                print(
-                    "💾 중복 방지 기록 완료"
-                )
-
-
-            except Exception as e:
-
-                print(
-                    "❌ 기사 처리 중 오류:",
-                    e
-                )
-
-                traceback.print_exc()
-
+            if not result or not getattr(result, "text", None):
+                print("❌ Gemini 응답 없음")
                 fail_count += 1
-
-                # 한 기사 실패해도
-                # 나머지 기사 계속 처리
                 continue
 
+            text = clean_gemini_text(result.text)
+            if not text:
+                print("❌ Gemini 요약 없음")
+                fail_count += 1
+                continue
 
-        # =================================================
-        # 최종 결과
-        # =================================================
+            safe_link = escape_markdown_url(link)
+            text += f"\n\n🔗 [기사 원문 보러가기]({safe_link})"
 
-        print("")
-        print(
-            "======================================"
-        )
+            if not send_telegram(text):
+                print("❌ Telegram 전송 실패")
+                fail_count += 1
+                continue
 
-        print(
-            "🏁 이번 뉴스 확인 완료"
-        )
+            keys = [
+                item["feed_url"],
+                item["final_url"],
+                item["guid_key"],
+                item["title_key"],
+            ]
+            save_sent_items(keys)
+            for key in keys:
+                if key:
+                    sent_items.add(key)
 
-        print(
-            f"✅ 전송 성공: "
-            f"{success_count}개"
-        )
+            print("✅ Telegram 전송 성공 / 중복 기록 저장")
+            success_count += 1
 
-        print(
-            f"❌ 전송 실패: "
-            f"{fail_count}개"
-        )
+        except Exception as e:
+            print("❌ 기사 처리 오류:", e)
+            traceback.print_exc()
+            fail_count += 1
+            continue
 
-        print(
-            "======================================"
-        )
+    print("\n======================================")
+    print("🏁 실행 완료")
+    print(f"✅ 성공: {success_count}개")
+    print(f"❌ 실패: {fail_count}개")
+    print("======================================")
 
-
-    except Exception:
-
-        print("")
-        print(
-            "💥 프로그램 실행 오류"
-        )
-
-        traceback.print_exc()
-
-
-# =========================================================
-# 실행
-# =========================================================
 
 if __name__ == "__main__":
     main()
