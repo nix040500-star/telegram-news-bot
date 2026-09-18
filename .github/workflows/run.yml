@@ -2,7 +2,7 @@ name: Daily News Auto Summary
 
 on:
   schedule:
-    - cron: '* * * * *'
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
