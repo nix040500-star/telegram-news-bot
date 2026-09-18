@@ -1,6 +1,7 @@
 import os
 import re
 import hashlib
+import random
 import traceback
 import requests
 import feedparser
@@ -446,9 +447,9 @@ def main():
 - URL은 절대로 작성하지 않는다.
 - '기사 원문 보러가기' 문구도 작성하지 않는다.
 
-마지막 형식:
-📌 짧게 말씀드리면..
-기사 전체 핵심을 한 문장으로 요약한다.
+마지막에는 기사 전체 핵심을 한 문장으로 요약한다.
+단, 마지막 핵심 문장 앞에 '짧게 말씀드리면', '요약하자면', '핵심은', '그래서 무슨 말이냐면', '쉽게 말하면' 같은 머리말은 직접 작성하지 않는다.
+머리말은 Python 프로그램이 랜덤으로 추가한다.
 
 [출처]
 {source}
@@ -477,6 +478,31 @@ def main():
                 print("❌ Gemini 요약 없음")
                 fail_count += 1
                 continue
+
+            closing_labels = [
+                "📌 짧게 말씀드리면..",
+                "📌 요약하자면..",
+                "📌 핵심은..",
+                "📌 그래서 무슨 말이냐면..",
+                "📌 쉽게 말하면..",
+            ]
+
+            # Gemini의 마지막 비어있지 않은 줄을 핵심 한 문장으로 보고
+            # Python에서 머리말을 랜덤으로 붙인다.
+            lines = [line.rstrip() for line in text.splitlines()]
+            nonempty = [i for i, line in enumerate(lines) if line.strip()]
+            if nonempty:
+                last_idx = nonempty[-1]
+                last_line = lines[last_idx].strip()
+                # 혹시 Gemini가 기존 머리말을 붙였으면 제거
+                last_line = re.sub(
+                    r"^(?:📌\s*)?(?:짧게\s*말씀드리면|요약하자면|핵심은|그래서\s*무슨\s*말이냐면|쉽게\s*말하면)\s*[.·:…-]*\s*",
+                    "",
+                    last_line,
+                    flags=re.IGNORECASE,
+                ).strip()
+                lines[last_idx] = random.choice(closing_labels) + "\n" + last_line
+                text = "\n".join(lines).strip()
 
             safe_link = escape_markdown_url(link)
             text += f"\n\n🔗 [기사 원문 보러가기]({safe_link})"
