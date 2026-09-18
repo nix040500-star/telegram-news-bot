@@ -1,91 +1,133 @@
 import os
-import feedparser
+import time
 import requests
-import google.generativeai as genai
+import feedparser
+import subprocess
+from google import genai
+from google.genai.errors import ServerError, APIError
 
-# 환경 변수 불러오기 (GitHub Secrets에서 가져옴)
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# AI 설정 (Gemini)
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+SENT_TITLES_FILE = "sent_titles.txt"
 
-# 구글 뉴스 암호화폐 RSS URL (최신순)
-GOOGLE_NEWS_RSS = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90+OR+%EB%B9%84%ED%8A%B8%EC%BD%94%EC%9D%B8&hl=ko&gl=KR&ceid=KR:ko"
+def load_sent_titles():
+    if not os.path.exists(SENT_TITLES_FILE):
+        return set()
+    with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
 
-# [핵심 프롬프트 템플릿]
-NEWS_PROMPT_TEMPLATE = """
-너는 전문 크립토(암호화폐) 뉴스 에디터야. 
-아래 제공되는 구글 뉴스 기사 원문을 바탕으로, 텔레그램 채널에 바로 게시할 수 있도록 핵심만 요약해 줘.
+def save_sent_title_and_git_commit(title):
+    with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
+        f.write(title + "\n")
+    
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", SENT_TITLES_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update sent_titles.txt [skip ci]"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("중복 방지 기록 깃허브 저장 완료")
+    except Exception as e:
+        print(f"Git 커밋 중 오류 발생 (무시 가능): {e}")
 
-[작성 규칙]
-1. 톤앤매너: 객관적이되, 투자자들이 한눈에 파악하기 쉽게 트렌디하고 직관적인 어조 사용
-2. 분량: 30초 만에 읽을 수 있도록 핵심 위주로 압축 (공백 포함 300자 이내)
-3. 필수 포함 내용:
-   - 📌 [제목]: 독자의 이목을끄는 직관적인 한 줄 제목 (이모지 포함)
-   - 🔍 [핵심 요약]: 사건의 배경과 내용을 2~3줄의 불렛 포인트(*)로 정리
-   - 💡 [시장 영향/시사점]: 해당 뉴스가 코인 시장에 미치는 영향 한 줄 평
-   - 🔗 [출처]: 제공된 링크 유지
-4. 가독성: 텔레그램 마크다운 형식을 활용해 가독성 극대화
+def send_telegram(text):
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    requests.post(url, json=payload)
 
-[기사 제목 및 링크]
-제목: {title}
-링크: {link}
-
-[기사 본문 요약/내용]
-{summary}
-"""
-
-def send_to_telegram(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": text,
-        "parse_mode": "Markdown"
-    }
-    response = requests.post(url, json=payload)
-    return response.json()
+def is_similar(new_title, sent_titles):
+    new_words = set(new_title.split())
+    if not new_words:
+        return False
+        
+    for sent in sent_titles:
+        sent_words = set(sent.split())
+        common_words = new_words.intersection(sent_words)
+        if len(common_words) >= 4 or (len(common_words) / len(new_words) >= 0.5):
+            return True
+    return False
 
 def main():
-    # RSS 피드 읽기
-    feed = feedparser.parse(GOOGLE_NEWS_RSS)
-    
-    if not feed.entries:
-        print("수집된 뉴스가 없습니다.")
-        return
-
-    # 가장 최신 뉴스 1개만 가져오기 (실시간 봇용)
-    latest_entry = feed.entries[0]
-    
-    title = latest_entry.get("title", "")
-    link = latest_entry.get("link", "")
-    summary = latest_entry.get("summary", title)
-
-    print(f"새 뉴스 감지: {title}")
-
-    # 프롬프트 조합
-    prompt = NEWS_PROMPT_TEMPLATE.format(
-        title=title,
-        link=link,
-        summary=summary
-    )
-
-    # Gemini AI에 요약 요청
     try:
-        response = model.generate_content(prompt)
-        ai_message = response.text
-    except Exception as e:
-        print(f"AI 요약 실패: {e}")
+        subprocess.run(["git", "pull"], check=True)
+    except:
+        pass
+
+    # 구글 뉴스 RSS URL (언어 한국어)
+    rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response_rss = requests.get(rss_url, headers=headers)
+    
+    if response_rss.status_code != 200:
+        print("RSS 접근 실패")
         return
 
-    # 텔레그램 전송
-    result = send_to_telegram(ai_message)
-    if result.get("ok"):
-        print("텔레그램 전송 성공!")
-    else:
-        print(f"텔레그램 전송 실패: {result}")
+    feed = feedparser.parse(response_rss.content)
+    if not feed.entries:
+        print("수집된 뉴스 없음")
+        return
 
-if __name__ == "__main__":
+    sent_titles = load_sent_titles()
+    
+    target_entry = None
+    # 피드에서 맨 위(가장 최신순)부터 차례대로 확인하면서 아직 안 보낸 첫 번째 기사 선택
+    for entry in feed.entries:
+        title = entry.title
+        
+        # 이미 보낸 뉴스이거나 유사한 제목이면 건너뛰고 다음 최신 기사 확인
+        if title in sent_titles or is_similar(title, sent_titles):
+            continue
+            
+        target_entry = entry
+        break
+            
+    if not target_entry:
+        print("새로운 기사 없음 (모두 이미 보낸 기사)")
+        return
+
+    title = target_entry.title
+    link = target_entry.link
+
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    prompt = f"""
+너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바탕으로 핵심 내용을 요약해줘.
+
+[엄격한 작성 규칙]
+1. "전문 크립토 애널리스트 시각에서 정리한..." 같은 인사말이나 서두 멘트는 절대 쓰지 말 것. 곧바로 본문 분석 내용부터 시작할 것.
+2. 기사의 핵심 내용을 3개 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성할 것.
+3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
+🔗 [기사 원문 보러가기]({link})
+
+[대상 기사]
+제목: {title}
+링크: {link}
+"""
+
+    max_retries = 3
+    response = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            break
+        except (ServerError, APIError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(5)
+            else:
+                raise e
+
+    if response:
+        result_text = response.text
+        if "[기사 원문 보러가기]" not in result_text:
+            result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
+        send_telegram(result_text)
+        save_sent_title_and_git_commit(title)
+
+if name == "main":
     main()
