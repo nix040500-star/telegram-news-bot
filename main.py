@@ -30,14 +30,13 @@ def send_telegram(text):
 
 def main():
     try:
-        print("--- 구글 암호화폐 뉴스 봇 실행 ---")
+        print("--- 구글 암호화폐 실시간 뉴스 봇 실행 ---")
         
         if not GEMINI_API_KEY:
             print("🚨 에러: GEMINI_API_KEY가 설정되지 않았습니다!")
             return
 
-        print("1. 지정된 구글 뉴스 검색 페이지 RSS 수집 중...")
-        # 보내주신 검색 페이지 주소의 쿼리 규격과 동일한 RSS 엔드포인트 적용
+        print("1. 구글 뉴스 검색 페이지 RSS 수집 중...")
         keyword = urllib.parse.quote("암호화폐")
         rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
         
@@ -53,12 +52,13 @@ def main():
             print("수집된 뉴스 없음")
             return
 
-        # 가장 최신 뉴스 포착
+        # 시간이나 중복 조건 없이 가장 최신 기사 1개를 무조건 타겟으로 지정
         target_entry = feed.entries[0]
         title = target_entry.title
         link = target_entry.link
         
         print(f"✨ 최신 뉴스 포착: {title}")
+        print(f"🔗 링크: {link}")
 
         print("2. Gemini AI 스마트폰 맞춤형 압축 요약 생성 중...")
         genai.configure(api_key=GEMINI_API_KEY)
