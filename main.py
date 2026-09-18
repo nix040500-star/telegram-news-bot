@@ -55,7 +55,6 @@ def main():
     except:
         pass
 
-    # 구글 뉴스 RSS URL (언어 한국어)
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -72,11 +71,8 @@ def main():
     sent_titles = load_sent_titles()
     
     target_entry = None
-    # 피드에서 맨 위(가장 최신순)부터 차례대로 확인하면서 아직 안 보낸 첫 번째 기사 선택
     for entry in feed.entries:
         title = entry.title
-        
-        # 이미 보낸 뉴스이거나 유사한 제목이면 건너뛰고 다음 최신 기사 확인
         if title in sent_titles or is_similar(title, sent_titles):
             continue
             
@@ -92,13 +88,15 @@ def main():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
+    # 핵심만 짧고 굵게, 이모티콘을 활용하도록 프롬프트 수정
     prompt = f"""
-너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바탕으로 핵심 내용을 요약해줘.
+너는 전문적인 크립토 애널리스트야. 아래 뉴스를 바쁘고 빠른 정보 습득이 필요한 투자자들을 위해 **초간단하게 핵심만** 요약해줘.
 
 [엄격한 작성 규칙]
-1. "전문 크립토 애널리스트 시각에서 정리한..." 같은 인사말이나 서두 멘트는 절대 쓰지 말 것. 곧바로 본문 분석 내용부터 시작할 것.
-2. 기사의 핵심 내용을 3개 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성할 것.
-3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
+1. 인사말, 서두 멘트, 설명조의 서브 타이틀은 절대 쓰지 말 것.
+2. 전체 분량을 스마트폰 화면에 꽉 차지 않도록 **짧은 3줄 이내**로 압축할 것.
+3. 중요한 키워드나 핵심 내용 앞에는 반드시 관련 이모티콘(🚨, 💡, 📈, 🚀, ⚠️ 등)을 붙여서 강조할 것.
+4. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
 🔗 [기사 원문 보러가기]({link})
 
 [대상 기사]
