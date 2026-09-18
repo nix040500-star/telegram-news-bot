@@ -1,30 +1,30 @@
-name: Realtime Crypto News Telegram Bot
+name: Daily News Auto Summary
 
 on:
   schedule:
-    - cron: '*/5 * * * *' # 5분마다 실행 (GitHub Actions 최소 주기는 보통 5분입니다)
-  workflow_dispatch: # 수동으로도 실행 가능
+    - cron: '0 10 * * *'
+  workflow_dispatch:
 
 jobs:
-  run-bot:
+  run-python-script:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
 
       - name: Install dependencies
         run: |
-          pip install requests feedparser google-generativeai
+          pip install requests feedparser google-genai
 
-      - name: Run Python Bot
+      - name: Run script
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
           python main.py
