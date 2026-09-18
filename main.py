@@ -16,7 +16,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 SENT_FILE = "sent_urls.txt"
 LOOKBACK_HOURS = 12
-MAX_ARTICLES_PER_RUN = 20
 
 HEADERS = {
     "User-Agent": (
@@ -379,8 +378,10 @@ def main():
             continue
         if guid_key and guid_key in current_guids:
             continue
-        if any(titles_are_same(item["title"], old) for old in current_titles):
-            print("⏭️ 다른 소스 동일/유사 기사:", item["title"])
+        if normalize_title(item["title"]) in {
+            normalize_title(old) for old in current_titles
+        }:
+            print("⏭️ 다른 소스 동일 제목 기사:", item["title"])
             continue
 
         # Resolve only after cheap duplicate checks.
@@ -406,8 +407,7 @@ def main():
         print("\n✅ 새로 보낼 뉴스가 없습니다.")
         return
 
-    # Avoid a flood if the bot was offline and suddenly catches up.
-    new_entries = new_entries[-MAX_ARTICLES_PER_RUN:]
+    # 발견된 미전송 새 뉴스는 개수 제한 없이 전부 전송
     print(f"\n🔥 새 뉴스 {len(new_entries)}개 전송 시작")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
