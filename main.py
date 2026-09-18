@@ -10,7 +10,6 @@ import email.utils
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 from google import genai
-from bs4 import BeautifulSoup
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -62,121 +61,6 @@ FEEDS = [
     ("Federal Reserve - Monetary Policy", "https://www.federalreserve.gov/feeds/press_monetary.xml", "macro"),
     ("Federal Reserve - Speeches", "https://www.federalreserve.gov/feeds/speeches.xml", "macro"),
 ]
-
-BLOOMINGBIT_SEARCH_URL = "https://bloomingbit.io/search"
-
-
-def fetch_bloomingbit_entries():
-    """블루밍비트 검색/최신 페이지에서 기사 링크를 직접 수집한다."""
-    print("\n🔎 Bloomingbit 확인 중...")
-    collected = []
-
-    try:
-        r = requests.get(BLOOMINGBIT_SEARCH_URL, headers=HEADERS, timeout=20)
-        if r.status_code != 200:
-            print(f"❌ Bloomingbit HTTP {r.status_code}")
-            return collected
-
-        soup = BeautifulSoup(r.text, "html.parser")
-        seen = set()
-
-        for a in soup.select('a[href*="/feed/news/"]'):
-            href = (a.get("href") or "").strip()
-            title = a.get_text(" ", strip=True)
-
-            if not href:
-                continue
-
-            url = urllib.parse.urljoin("https://bloomingbit.io", href)
-            url = canonicalize_url(url)
-
-            if url in seen:
-                continue
-            seen.add(url)
-
-            # 목록에서 제목이 비어 있으면 기사 페이지에서 직접 가져온다.
-            try:
-                article = requests.get(url, headers=HEADERS, timeout=15)
-                if article.status_code != 200:
-                    continue
-
-                article_soup = BeautifulSoup(article.text, "html.parser")
-
-                if not title:
-                    h1 = article_soup.find("h1")
-                    if h1:
-                        title = h1.get_text(" ", strip=True)
-
-                # og:title fallback
-                if not title:
-                    og_title = article_soup.find("meta", property="og:title")
-                    if og_title:
-                        title = (og_title.get("content") or "").strip()
-
-                # published_time / datePublished 탐색
-                published = None
-                for meta_key, meta_value in [
-                    ("property", "article:published_time"),
-                    ("name", "article:published_time"),
-                    ("itemprop", "datePublished"),
-                ]:
-                    tag = article_soup.find("meta", attrs={meta_key: meta_value})
-                    if tag and tag.get("content"):
-                        raw = tag.get("content").strip()
-                        try:
-                            published = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-                            if published.tzinfo is None:
-                                published = published.replace(tzinfo=timezone.utc)
-                            published = published.astimezone(timezone.utc)
-                            break
-                        except Exception:
-                            pass
-
-                # JSON-LD fallback
-                if published is None:
-                    for script in article_soup.find_all("script", type="application/ld+json"):
-                        raw = script.string or script.get_text()
-                        m = re.search(r'"datePublished"\s*:\s*"([^"]+)"', raw or "")
-                        if m:
-                            try:
-                                published = datetime.fromisoformat(m.group(1).replace("Z", "+00:00"))
-                                if published.tzinfo is None:
-                                    published = published.replace(tzinfo=timezone.utc)
-                                published = published.astimezone(timezone.utc)
-                                break
-                            except Exception:
-                                pass
-
-                if not title or published is None:
-                    continue
-
-                desc = ""
-                meta_desc = article_soup.find("meta", attrs={"name": "description"})
-                if meta_desc:
-                    desc = (meta_desc.get("content") or "").strip()
-
-                collected.append({
-                    "source": "Bloomingbit",
-                    "feed_type": "crypto",
-                    "entry": {"title": title, "link": url, "id": url},
-                    "title": title,
-                    "summary": desc,
-                    "feed_url": url,
-                    "published": published,
-                    "guid_key": "GUID:" + url,
-                    "title_key": make_title_key(title),
-                })
-
-            except Exception as e:
-                print("⚠️ Bloomingbit 기사 확인 실패:", e)
-                continue
-
-        print(f"📰 Bloomingbit: {len(collected)}개")
-        return collected
-
-    except Exception as e:
-        print("❌ Bloomingbit 수집 오류:", e)
-        return collected
 
 
 def load_sent_items():
@@ -436,9 +320,6 @@ def fetch_all_entries():
         except Exception as e:
             print(f"❌ {source} 수집 오류:", e)
             continue
-
-    # 블루밍비트는 RSS 대신 웹 최신/검색 페이지를 직접 확인
-    collected.extend(fetch_bloomingbit_entries())
 
     return collected
 
