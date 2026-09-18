@@ -30,7 +30,7 @@ def save_sent_title(title):
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        raise ValueError("🚨 TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 GitHub Secrets에 설정되지 않았습니다!")
+        raise ValueError("🚨 TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다!")
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
@@ -57,7 +57,7 @@ def main():
         print("--- 크립토 뉴스 봇 실행 시작 ---")
         
         if not GEMINI_API_KEY:
-            raise ValueError("🚨 GEMINI_API_KEY가 GitHub Secrets에 설정되지 않았습니다!")
+            raise ValueError("🚨 GEMINI_API_KEY가 설정되지 않았습니다!")
 
         print("1. RSS 뉴스 수집 시작...")
         rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
@@ -108,8 +108,9 @@ def main():
 링크: {link}
 """
 
+        # 최신 SDK 규격에 맞는 안정적인 범용 모델로 변경
         response = client.models.generate_content(
-            model="gemini-1.5-flash",
+            model="gemini-2.5-flash",
             contents=prompt,
         )
 
