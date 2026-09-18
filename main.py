@@ -108,9 +108,9 @@ def main():
 링크: {link}
 """
 
-        # 최신 SDK 규격에 맞는 안정적인 범용 모델로 변경
+        # 에러 로그에서 권장하는 최신 모델로 변경 완료
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="gemini-3.6-flash",
             contents=prompt,
         )
 
