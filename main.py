@@ -3,7 +3,6 @@ import time
 import requests
 import feedparser
 import subprocess
-from datetime import datetime, timezone, timedelta
 from google import genai
 from google.genai.errors import ServerError, APIError
 
@@ -56,7 +55,7 @@ def main():
     except:
         pass
 
-    # 구글 뉴스 RSS URL (언어 한국어, 최신순 정렬 유도를 위한 파라미터 포함)
+    # 구글 뉴스 RSS URL (언어 한국어)
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -72,31 +71,20 @@ def main():
 
     sent_titles = load_sent_titles()
     
-    # 현재 시간 (UTC 기준)
-    now_utc = datetime.now(timezone.utc)
-    
     target_entry = None
+    # 피드에서 맨 위(가장 최신순)부터 차례대로 확인하면서 아직 안 보낸 첫 번째 기사 선택
     for entry in feed.entries:
         title = entry.title
         
-        # 1. 이미 보낸 뉴스이거나 비슷한 제목이면 패스
+        # 이미 보낸 뉴스이거나 유사한 제목이면 건너뛰고 다음 최신 기사 확인
         if title in sent_titles or is_similar(title, sent_titles):
             continue
             
-        # 2. 기사 발행 시간 검사 (최근 24시간 이내 기사만 허용)
-        if hasattr(entry, 'published_parsed') and entry.published_parsed:
-            from time import mktime
-            pub_date = datetime.fromtimestamp(mktime(entry.published_parsed), timezone.utc)
-            # 현재 시간과 기사 발행 시간의 차이가 24시간 이내인지 확인
-            if (now_utc - pub_date) > timedelta(hours=24):
-                print(f"너무 오래된 기사 스킵: {title}")
-                continue
-                
         target_entry = entry
         break
             
     if not target_entry:
-        print("24시간 이내의 새로운 기사 없음")
+        print("새로운 기사 없음 (모두 이미 보낸 기사)")
         return
 
     title = target_entry.title
