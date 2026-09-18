@@ -29,15 +29,16 @@ def save_sent_title(title):
         print(f"파일 저장 중 에러: {e}")
 
 def send_telegram(text):
-    try:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-        res = requests.post(url, json=payload)
-        print(f"텔레그램 전송 응답 코드: {res.status_code}")
-        if res.status_code != 200:
-            print(f"텔레그램 응답 내용: {res.text}")
-    except Exception as e:
-        print(f"텔레그램 전송 실패: {e}")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        raise ValueError("🚨 TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 GitHub Secrets에 설정되지 않았습니다!")
+        
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+    res = requests.post(url, json=payload)
+    
+    print(f"텔레그램 전송 응답 코드: {res.status_code}")
+    if res.status_code != 200:
+        raise Exception(f"텔레그램 전송 실패! 응답 내용: {res.text}")
 
 def is_similar(new_title, sent_titles):
     new_words = set(new_title.split())
@@ -53,14 +54,18 @@ def is_similar(new_title, sent_titles):
 
 def main():
     try:
+        print("--- 크립토 뉴스 봇 실행 시작 ---")
+        
+        if not GEMINI_API_KEY:
+            raise ValueError("🚨 GEMINI_API_KEY가 GitHub Secrets에 설정되지 않았습니다!")
+
         print("1. RSS 뉴스 수집 시작...")
         rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
         headers = {"User-Agent": "Mozilla/5.0"}
         response_rss = requests.get(rss_url, headers=headers)
         
         if response_rss.status_code != 200:
-            print(f"RSS 접근 실패 코드: {response_rss.status_code}")
-            return
+            raise Exception(f"RSS 접근 실패! 상태 코드: {response_rss.status_code}")
 
         feed = feedparser.parse(response_rss.content)
         if not feed.entries:
@@ -86,9 +91,6 @@ def main():
         print(f"선택된 뉴스 제목: {title}")
 
         print("2. Gemini AI 요약 생성 시작...")
-        if not GEMINI_API_KEY:
-            raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다!")
-            
         client = genai.Client(api_key=GEMINI_API_KEY)
         
         prompt = f"""
@@ -122,7 +124,7 @@ def main():
             print("모든 작업 완료!")
 
     except Exception as e:
-        print("🚨 상세 에러 발생 내용:")
+        print("🚨 스크립트 실행 중 치명적 에러 발생:")
         traceback.print_exc()
         raise e
 
