@@ -55,7 +55,6 @@ def main():
     except:
         pass
 
-    # 구글 뉴스 RSS URL (언어 한국어)
     rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
     headers = {"User-Agent": "Mozilla/5.0"}
     response_rss = requests.get(rss_url, headers=headers)
@@ -90,7 +89,6 @@ def main():
 
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 요약을 훨씬 더 간결하게 압축하고, 이모티콘을 1~2개 핵심 부위에 포함하도록 변경한 프롬프트
     prompt = f"""
 너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바쁘고 빠른 정보 습득이 필요한 투자자들을 위해 **매우 짧고 강렬하게 핵심만** 요약해줘.
 
