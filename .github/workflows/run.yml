@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 소스코드 체크아웃
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: 파이썬 설정
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
