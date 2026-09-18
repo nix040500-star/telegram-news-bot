@@ -2,7 +2,7 @@ import os
 import traceback
 import requests
 import feedparser
-import google.generativeai as genai
+from google import genai
 import urllib.parse
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -11,7 +11,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ [텔레그램 에러] TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 깃허브 Secrets에 설정되지 않았습니다!")
+        print("❌ [텔레그램 에러] 토큰 또는 챗 ID가 설정되지 않았습니다.")
         return False
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -19,15 +19,13 @@ def send_telegram(text):
     
     try:
         res = requests.post(url, json=payload, timeout=10)
-        print(f"텔레그램 서버 응답 코드: {res.status_code}")
-        print(f"텔레그램 서버 응답 내용: {res.text}")
-        
+        print(f"텔레그램 응답 코드: {res.status_code}")
+        print(f"텔레그램 응답 내용: {res.text}")
         if res.status_code != 200:
-            print("❌ [텔레그램 에러] 텔레그램 API가 전송을 거부했습니다.")
             return False
         return True
     except Exception as e:
-        print(f"❌ [텔레그램 에러] 요청 중 예외 발생: {e}")
+        print(f"❌ [텔레그램 에러] 예외 발생: {e}")
         return False
 
 def main():
@@ -61,8 +59,7 @@ def main():
         print(f"✨ 최신 뉴스 포착 완료: {title}")
 
         print("2. Gemini AI 요약 생성 중...")
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        client = genai.Client(api_key=GEMINI_API_KEY)
         
         prompt = f"""
 너는 트렌디한 크립토 채널 운영자야. 아래 뉴스를 스마트폰 화면에 스크롤 없이 한눈에 들어오도록 2~3줄로 압축 요약해줘.
@@ -72,7 +69,10 @@ def main():
 링크: {link}
 """
 
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+        )
         
         if response and response.text:
             result_text = response.text
@@ -82,7 +82,7 @@ def main():
             print("3. 텔레그램 전송 시도...")
             success = send_telegram(result_text)
             if success:
-                print("🎉 텔레그램 전송 성공!")
+                print("🎉 모든 작업 성공적으로 완료!")
             else:
                 print("❌ 텔레그램 전송 실패")
         else:
