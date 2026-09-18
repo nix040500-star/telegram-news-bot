@@ -4,6 +4,7 @@ import traceback
 import requests
 import feedparser
 import google.generativeai as genai
+import urllib.parse
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
@@ -66,16 +67,22 @@ def main():
             print("🚨 에러: GEMINI_API_KEY가 설정되지 않았습니다!")
             return
 
-        print("1. RSS 뉴스 수집 시작...")
-        rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
-        headers = {"User-Agent": "Mozilla/5.0"}
+        print("1. 실시간 RSS 뉴스 수집 시작...")
+        # 실시간성이 높은 구글 뉴스 RSS 표준 쿼리 적용
+        keyword = urllib.parse.quote("암호화폐")
+        rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
+        
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
         response_rss = requests.get(rss_url, headers=headers)
         
+        print(f"RSS 응답 코드: {response_rss.status_code}")
         if response_rss.status_code != 200:
             print(f"RSS 접근 실패 상태 코드: {response_rss.status_code}")
             return
 
         feed = feedparser.parse(response_rss.content)
+        print(f"수집된 전체 기사 개수: {len(feed.entries)}")
+        
         if not feed.entries:
             print("수집된 뉴스 없음")
             return
@@ -83,6 +90,9 @@ def main():
         sent_titles = load_sent_titles()
         
         target_entry = None
+        for i, entry in enumerate(feed.entries[:5]):
+            print(f"[{i+1번째 기사 제목]: {entry.title}")
+
         for entry in feed.entries:
             title = entry.title
             if title in sent_titles or is_similar(title, sent_titles):
@@ -91,12 +101,12 @@ def main():
             break
                 
         if not target_entry:
-            print("새로운 기사 없음 (모두 이미 보낸 기사)")
+            print("새로운 기사 없음 (최근 기사들이 모두 이미 발송된 기록에 있음)")
             return
 
         title = target_entry.title
         link = target_entry.link
-        print(f"선택된 뉴스 제목: {title}")
+        print(f"✨ 최종 선택된 새로운 뉴스 제목: {title}")
 
         print("2. Gemini AI 요약 생성 시작...")
         genai.configure(api_key=GEMINI_API_KEY)
