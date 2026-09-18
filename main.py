@@ -14,17 +14,27 @@ SENT_TITLES_FILE = "sent_titles.txt"
 def load_sent_titles():
     if not os.path.exists(SENT_TITLES_FILE):
         return set()
-    with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
-        return set(line.strip() for line in f if line.strip())
+    try:
+        with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
+            return set(line.strip() for line in f if line.strip())
+    except:
+        return set()
 
 def save_sent_title(title):
-    with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
-        f.write(title + "\n")
+    try:
+        with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
+            f.write(title + "\n")
+    except Exception as e:
+        print(f"파일 저장 중 에러: {e}")
 
 def send_telegram(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload)
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+        res = requests.post(url, json=payload)
+        print(f"텔레그램 전송 응답 코드: {res.status_code}")
+    except Exception as e:
+        print(f"텔레그램 전송 실패: {e}")
 
 def is_similar(new_title, sent_titles):
     new_words = set(new_title.split())
@@ -39,41 +49,43 @@ def is_similar(new_title, sent_titles):
     return False
 
 def main():
-    rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response_rss = requests.get(rss_url, headers=headers)
-    
-    if response_rss.status_code != 200:
-        print("RSS 접근 실패")
-        return
-
-    feed = feedparser.parse(response_rss.content)
-    if not feed.entries:
-        print("수집된 뉴스 없음")
-        return
-
-    sent_titles = load_sent_titles()
-    
-    target_entry = None
-    for entry in feed.entries:
-        title = entry.title
+    try:
+        print("1. RSS 뉴스 수집 시작...")
+        rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response_rss = requests.get(rss_url, headers=headers)
         
-        if title in sent_titles or is_similar(title, sent_titles):
-            continue
-            
-        target_entry = entry
-        break
-            
-    if not target_entry:
-        print("새로운 기사 없음 (모두 이미 보낸 기사)")
-        return
+        if response_rss.status_code != 200:
+            print(f"RSS 접근 실패 코드: {response_rss.status_code}")
+            return
 
-    title = target_entry.title
-    link = target_entry.link
+        feed = feedparser.parse(response_rss.content)
+        if not feed.entries:
+            print("수집된 뉴스 없음")
+            return
 
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    
-    prompt = f"""
+        sent_titles = load_sent_titles()
+        
+        target_entry = None
+        for entry in feed.entries:
+            title = entry.title
+            if title in sent_titles or is_similar(title, sent_titles):
+                continue
+            target_entry = entry
+            break
+                
+        if not target_entry:
+            print("새로운 기사 없음 (모두 이미 보낸 기사)")
+            return
+
+        title = target_entry.title
+        link = target_entry.link
+        print(f"선택된 뉴스 제목: {title}")
+
+        print("2. Gemini AI 요약 생성 시작...")
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        prompt = f"""
 너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바쁘고 빠른 정보 습득이 필요한 투자자들을 위해 **매우 짧고 강렬하게 핵심만** 요약해줘.
 
 [엄격한 작성 규칙]
@@ -88,29 +100,23 @@ def main():
 링크: {link}
 """
 
-    max_retries = 3
-    response = None
-    
-    for attempt in range(max_retries):
-        try:
-            # 안정적인 표준 모델명으로 변경
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt,
-            )
-            break
-        except (ServerError, APIError) as e:
-            if attempt < max_retries - 1:
-                time.sleep(5)
-            else:
-                raise e
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+        )
 
-    if response:
-        result_text = response.text
-        if "[기사 원문 보러가기]" not in result_text:
-            result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-        send_telegram(result_text)
-        save_sent_title(title)
+        if response and response.text:
+            result_text = response.text
+            if "[기사 원문 보러가기]" not in result_text:
+                result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
+            
+            print("3. 텔레그램 전송 중...")
+            send_telegram(result_text)
+            save_sent_title(title)
+            print("모든 작업 완료!")
+
+    except Exception as e:
+        print(f"🚨 실행 중 예외 발생: {str(e)}")
 
 if __name__ == "__main__":
     main()
