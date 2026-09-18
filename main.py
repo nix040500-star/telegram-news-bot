@@ -29,15 +29,22 @@ def save_sent_title(title):
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        raise ValueError("🚨 TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 설정되지 않았습니다!")
+        print("🚨 에러: TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 비어있습니다!")
+        return False
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    res = requests.post(url, json=payload)
     
-    print(f"텔레그램 전송 응답 코드: {res.status_code}")
-    if res.status_code != 200:
-        raise Exception(f"텔레그램 전송 실패! 응답 내용: {res.text}")
+    try:
+        res = requests.post(url, json=payload)
+        print(f"텔레그램 전송 응답 코드: {res.status_code}")
+        if res.status_code != 200:
+            print(f"텔레그램 전송 실패 상세 내용: {res.text}")
+            return False
+        return True
+    except Exception as e:
+        print(f"텔레그램 요청 중 예외 발생: {e}")
+        return False
 
 def is_similar(new_title, sent_titles):
     new_words = set(new_title.split())
@@ -56,7 +63,8 @@ def main():
         print("--- 크립토 뉴스 봇 실행 시작 ---")
         
         if not GEMINI_API_KEY:
-            raise ValueError("🚨 GEMINI_API_KEY가 설정되지 않았습니다!")
+            print("🚨 에러: GEMINI_API_KEY가 설정되지 않았습니다!")
+            return
 
         print("1. RSS 뉴스 수집 시작...")
         rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
@@ -64,7 +72,8 @@ def main():
         response_rss = requests.get(rss_url, headers=headers)
         
         if response_rss.status_code != 200:
-            raise Exception(f"RSS 접근 실패! 상태 코드: {response_rss.status_code}")
+            print(f"RSS 접근 실패 상태 코드: {response_rss.status_code}")
+            return
 
         feed = feedparser.parse(response_rss.content)
         if not feed.entries:
@@ -107,7 +116,6 @@ def main():
 링크: {link}
 """
 
-        # 가장 안정적이고 호환성이 높은 표준 모델 지정
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(prompt)
 
@@ -117,14 +125,18 @@ def main():
                 result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
             
             print("3. 텔레그램 전송 중...")
-            send_telegram(result_text)
-            save_sent_title(title)
-            print("모든 작업 완료!")
+            success = send_telegram(result_text)
+            if success:
+                save_sent_title(title)
+                print("모든 작업 성공적으로 완료!")
+            else:
+                print("텔레그램 전송 실패로 인해 히스토리 저장을 건너뜁니다.")
+        else:
+            print("Gemini AI로부터 응답을 받지 못했습니다.")
 
     except Exception as e:
-        print("🚨 스크립트 실행 중 치명적 에러 발생:")
+        print("🚨 치명적인 예외 발생:")
         traceback.print_exc()
-        raise e
 
 if __name__ == "__main__":
     main()
