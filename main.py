@@ -1,97 +1,133 @@
 import os
-import traceback
+import time
 import requests
 import feedparser
-import google.generativeai as genai
-import urllib.parse
+import subprocess
+from google import genai
+from google.genai.errors import ServerError, APIError
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+SENT_TITLES_FILE = "sent_titles.txt"
+
+def load_sent_titles():
+    if not os.path.exists(SENT_TITLES_FILE):
+        return set()
+    with open(SENT_TITLES_FILE, "r", encoding="utf-8") as f:
+        return set(line.strip() for line in f if line.strip())
+
+def save_sent_title_and_git_commit(title):
+    with open(SENT_TITLES_FILE, "a", encoding="utf-8") as f:
+        f.write(title + "\n")
+    
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", SENT_TITLES_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update sent_titles.txt [skip ci]"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("중복 방지 기록 깃허브 저장 완료")
+    except Exception as e:
+        print(f"Git 커밋 중 오류 발생 (무시 가능): {e}")
+
 def send_telegram(text):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ [텔레그램 에러] TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 비어있습니다!")
-        print(f"현재 토큰 존재 여부: {bool(TELEGRAM_TOKEN)}, 챗 ID 존재 여부: {bool(TELEGRAM_CHAT_ID)}")
-        return False
-        
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    
-    try:
-        res = requests.post(url, json=payload, timeout=10)
-        print(f"텔레그램 서버 응답 코드: {res.status_code}")
-        print(f"텔레그램 서버 응답 내용: {res.text}")
-        
-        if res.status_code != 200:
-            print("❌ [텔레그램 에러] 텔레그램 API가 전송을 거부했습니다. (챗 ID나 봇 권한을 확인하세요)")
-            return False
-        return True
-    except Exception as e:
-        print(f"❌ [텔레그램 에러] 요청 중 예외 발생: {e}")
+    requests.post(url, json=payload)
+
+def is_similar(new_title, sent_titles):
+    new_words = set(new_title.split())
+    if not new_words:
         return False
+        
+    for sent in sent_titles:
+        sent_words = set(sent.split())
+        common_words = new_words.intersection(sent_words)
+        if len(common_words) >= 4 or (len(common_words) / len(new_words) >= 0.5):
+            return True
+    return False
 
 def main():
-    print("=== 🚀 크립토 실시간 뉴스 봇 실행 시작 ===")
-    
     try:
-        if not GEMINI_API_KEY:
-            print("❌ [에러] GEMINI_API_KEY가 설정되지 않았습니다.")
-            return
+        subprocess.run(["git", "pull"], check=True)
+    except:
+        pass
 
-        print("1. 구글 뉴스 검색 RSS 수집 중...")
-        keyword = urllib.parse.quote("암호화폐")
-        rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
+    # 구글 뉴스 RSS URL (언어 한국어)
+    rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    response_rss = requests.get(rss_url, headers=headers)
+    
+    if response_rss.status_code != 200:
+        print("RSS 접근 실패")
+        return
+
+    feed = feedparser.parse(response_rss.content)
+    if not feed.entries:
+        print("수집된 뉴스 없음")
+        return
+
+    sent_titles = load_sent_titles()
+    
+    target_entry = None
+    # 피드에서 맨 위(가장 최신순)부터 차례대로 확인하면서 아직 안 보낸 첫 번째 기사 선택
+    for entry in feed.entries:
+        title = entry.title
         
-        headers = {"User-Agent": "Mozilla/5.0"}
-        response_rss = requests.get(rss_url, headers=headers, timeout=10)
-        
-        if response_rss.status_code != 200:
-            print(f"❌ [에러] RSS 접근 실패 (코드: {response_rss.status_code})")
-            return
+        # 이미 보낸 뉴스이거나 유사한 제목이면 건너뛰고 다음 최신 기사 확인
+        if title in sent_titles or is_similar(title, sent_titles):
+            continue
+            
+        target_entry = entry
+        break
+            
+    if not target_entry:
+        print("새로운 기사 없음 (모두 이미 보낸 기사)")
+        return
 
-        feed = feedparser.parse(response_rss.content)
-        if not feed.entries:
-            print("❌ [에러] 수집된 뉴스가 없습니다.")
-            return
+    title = target_entry.title
+    link = target_entry.link
 
-        target_entry = feed.entries[0]
-        title = target_entry.title
-        link = target_entry.link
-        
-        print(f"✨ 최신 뉴스 포착 완료: {title}")
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    
+    prompt = f"""
+너는 전문적인 크립토 애널리스트야. 아래 최신 뉴스를 바탕으로 핵심 내용을 요약해줘.
 
-        print("2. Gemini AI 요약 생성 중...")
-        genai.configure(api_key=GEMINI_API_KEY)
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        prompt = f"""
-너는 트렌디한 크립토 채널 운영자야. 아래 뉴스를 스마트폰 화면에 스크롤 없이 한눈에 들어오도록 2~3줄로 압축 요약해줘.
-인사말이나 서두 없이 곧바로 본문부터 시작하고, 마지막 줄에 원문 링크를 넣어줘.
+[엄격한 작성 규칙]
+1. "전문 크립토 애널리스트 시각에서 정리한..." 같은 인사말이나 서두 멘트는 절대 쓰지 말 것. 곧바로 본문 분석 내용부터 시작할 것.
+2. 기사의 핵심 내용을 3개 단락으로 나누어 차분하고 신뢰감 있는 뉴스 분석 스타일로 작성할 것.
+3. 글의 마지막 줄에는 반드시 아래 형식으로 링크를 포함할 것:
+🔗 [기사 원문 보러가기]({link})
 
+[대상 기사]
 제목: {title}
 링크: {link}
 """
 
-        response = model.generate_content(prompt)
-        
-        if response and response.text:
-            result_text = response.text
-            if "[기사 원문 보러가기]" not in result_text and "🔗" not in result_text:
-                result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-            
-            print("3. 텔레그램 전송 시도...")
-            success = send_telegram(result_text)
-            if success:
-                print("🎉 텔레그램 전송 성공!")
+    max_retries = 3
+    response = None
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=prompt,
+            )
+            break
+        except (ServerError, APIError) as e:
+            if attempt < max_retries - 1:
+                time.sleep(5)
             else:
-                print("❌ 텔레그램 전송 실패 (위의 응답 내용을 확인하세요)")
-        else:
-            print("❌ [에러] Gemini AI로부터 응답을 받지 못했습니다.")
+                raise e
 
-    except Exception as e:
-        print("💥 [치명적 예외 발생]")
-        traceback.print_exc()
+    if response:
+        result_text = response.text
+        if "[기사 원문 보러가기]" not in result_text:
+            result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
+        send_telegram(result_text)
+        save_sent_title_and_git_commit(title)
 
-if __name__ == "__main__":
+if name == "main":
     main()
