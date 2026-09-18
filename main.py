@@ -16,7 +16,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 SENT_FILE = "sent_urls.txt"
-LOOKBACK_HOURS = 12
+LOOKBACK_MINUTES = 30
 
 HEADERS = {
     "User-Agent": (
@@ -358,7 +358,7 @@ def main():
 
         if age.total_seconds() < -300:
             continue
-        if age > timedelta(hours=LOOKBACK_HOURS):
+        if age > timedelta(minutes=LOOKBACK_MINUTES):
             continue
 
         feed_url = item["feed_url"]
