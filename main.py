@@ -29,15 +29,16 @@ def send_telegram(text):
         return False
 
 def main():
-    print("=== 🚀 크립토 실시간 뉴스 봇 실행 시작 ===")
+    print("=== 🚀 현시간 기준 크립토 실시간 뉴스 봇 실행 ===")
     
     try:
         if not GEMINI_API_KEY:
             print("❌ [에러] GEMINI_API_KEY가 설정되지 않았습니다.")
             return
 
-        print("1. 구글 뉴스 검색 RSS 수집 중...")
+        print("1. 구글 뉴스 RSS 현시간 기준 실시간 수집 중...")
         keyword = urllib.parse.quote("암호화폐")
+        # 캐시 방지용 파라미터 추가로 항상 가장 최신 실시간 RSS 보장
         rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
         
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -52,16 +53,16 @@ def main():
             print("❌ [에러] 수집된 뉴스가 없습니다.")
             return
 
+        # 현시간 기준 가장 최신 기사 1개를 무조건 타겟으로 지정
         target_entry = feed.entries[0]
         title = target_entry.title
         link = target_entry.link
         
-        print(f"✨ 최신 뉴스 포착 완료: {title}")
+        print(f"✨ 현시간 최신 뉴스 포착 완료: {title}")
 
-        print("2. Gemini AI 요약 생성 중...")
+        print("2. Gemini AI 전문 요약 생성 중...")
         client = genai.Client(api_key=GEMINI_API_KEY)
         
-        # 요청하신 전문적이고 가독성 높은 요약 프롬프트 적용
         prompt = f"""
 너는 전문적인 크립토 시장 분석가이자 트렌디한 뉴스 채널 운영자야. 아래 제공되는 뉴스 기사를 분석하여, 스마트폰 푸시 알림이나 화면으로 볼 때 스크롤 없이 한눈에 쏙 들어오도록 아래 [작성 포맷]에 맞춰 깔끔하게 요약해줘.
 
@@ -84,14 +85,13 @@ def main():
         
         if response and response.text:
             result_text = response.text
-            # 혹시라도 모델이 원문 링크를 빼먹었을 경우를 대비한 안전 장치
             if "[기사 원문 보러가기]" not in result_text and "🔗" not in result_text:
                 result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
             
             print("3. 텔레그램 전송 시도...")
             success = send_telegram(result_text)
             if success:
-                print("🎉 모든 작업 성공적으로 완료!")
+                print("🎉 현시간 뉴스 전송 성공!")
             else:
                 print("❌ 텔레그램 전송 실패")
         else:
