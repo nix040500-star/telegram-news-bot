@@ -61,7 +61,6 @@ def main():
         print("2. Gemini AI 스마트폰 맞춤형 압축 요약 생성 중...")
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # 가장 안정적이고 호환성이 높은 최신 표준 호출 방식으로 수정
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
