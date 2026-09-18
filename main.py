@@ -11,7 +11,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 def send_telegram(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ [에러] 텔레그램 토큰 또는 챗 ID가 설정되지 않았습니다.")
+        print("❌ [텔레그램 에러] TELEGRAM_TOKEN 또는 TELEGRAM_CHAT_ID가 비어있습니다!")
+        print(f"현재 토큰 존재 여부: {bool(TELEGRAM_TOKEN)}, 챗 ID 존재 여부: {bool(TELEGRAM_CHAT_ID)}")
         return False
         
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -19,13 +20,15 @@ def send_telegram(text):
     
     try:
         res = requests.post(url, json=payload, timeout=10)
-        print(f"텔레그램 응답 코드: {res.status_code}")
+        print(f"텔레그램 서버 응답 코드: {res.status_code}")
+        print(f"텔레그램 서버 응답 내용: {res.text}")
+        
         if res.status_code != 200:
-            print(f"텔레그램 전송 실패 내용: {res.text}")
+            print("❌ [텔레그램 에러] 텔레그램 API가 전송을 거부했습니다. (챗 ID나 봇 권한을 확인하세요)")
             return False
         return True
     except Exception as e:
-        print(f"❌ [에러] 텔레그램 전송 중 예외 발생: {e}")
+        print(f"❌ [텔레그램 에러] 요청 중 예외 발생: {e}")
         return False
 
 def main():
@@ -42,15 +45,12 @@ def main():
         
         headers = {"User-Agent": "Mozilla/5.0"}
         response_rss = requests.get(rss_url, headers=headers, timeout=10)
-        print(f"RSS 응답 코드: {response_rss.status_code}")
         
         if response_rss.status_code != 200:
             print(f"❌ [에러] RSS 접근 실패 (코드: {response_rss.status_code})")
             return
 
         feed = feedparser.parse(response_rss.content)
-        print(f"수집된 전체 기사 수: {len(feed.entries)}")
-        
         if not feed.entries:
             print("❌ [에러] 수집된 뉴스가 없습니다.")
             return
@@ -63,8 +63,6 @@ def main():
 
         print("2. Gemini AI 요약 생성 중...")
         genai.configure(api_key=GEMINI_API_KEY)
-        
-        # 가장 안정적인 기본 모델 명시
         model = genai.GenerativeModel('gemini-1.5-flash')
         
         prompt = f"""
@@ -82,12 +80,12 @@ def main():
             if "[기사 원문 보러가기]" not in result_text and "🔗" not in result_text:
                 result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
             
-            print("3. 텔레그램 전송 중...")
+            print("3. 텔레그램 전송 시도...")
             success = send_telegram(result_text)
             if success:
-                print("🎉 모든 작업 성공적으로 완료!")
+                print("🎉 텔레그램 전송 성공!")
             else:
-                print("❌ [에러] 텔레그램 전송 실패")
+                print("❌ 텔레그램 전송 실패 (위의 응답 내용을 확인하세요)")
         else:
             print("❌ [에러] Gemini AI로부터 응답을 받지 못했습니다.")
 
