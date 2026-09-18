@@ -1,5 +1,6 @@
 import os
 import time
+import traceback
 import requests
 import feedparser
 from google import genai
@@ -31,7 +32,10 @@ def send_telegram(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-        requests.post(url, json=payload)
+        res = requests.post(url, json=payload)
+        print(f"텔레그램 전송 응답 코드: {res.status_code}")
+        if res.status_code != 200:
+            print(f"텔레그램 응답 내용: {res.text}")
     except Exception as e:
         print(f"텔레그램 전송 실패: {e}")
 
@@ -48,39 +52,46 @@ def is_similar(new_title, sent_titles):
     return False
 
 def main():
-    rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response_rss = requests.get(rss_url, headers=headers)
-    
-    if response_rss.status_code != 200:
-        print("RSS 접근 실패")
-        return
+    try:
+        print("1. RSS 뉴스 수집 시작...")
+        rss_url = "https://news.google.com/rss/search?q=%EC%95%94%ED%98%B8%ED%99%94%ED%8F%90&hl=ko&gl=KR&ceid=KR:ko"
+        headers = {"User-Agent": "Mozilla/5.0"}
+        response_rss = requests.get(rss_url, headers=headers)
+        
+        if response_rss.status_code != 200:
+            print(f"RSS 접근 실패 코드: {response_rss.status_code}")
+            return
 
-    feed = feedparser.parse(response_rss.content)
-    if not feed.entries:
-        print("수집된 뉴스 없음")
-        return
+        feed = feedparser.parse(response_rss.content)
+        if not feed.entries:
+            print("수집된 뉴스 없음")
+            return
 
-    sent_titles = load_sent_titles()
-    
-    target_entry = None
-    for entry in feed.entries:
-        title = entry.title
-        if title in sent_titles or is_similar(title, sent_titles):
-            continue
-        target_entry = entry
-        break
+        sent_titles = load_sent_titles()
+        
+        target_entry = None
+        for entry in feed.entries:
+            title = entry.title
+            if title in sent_titles or is_similar(title, sent_titles):
+                continue
+            target_entry = entry
+            break
+                
+        if not target_entry:
+            print("새로운 기사 없음 (모두 이미 보낸 기사)")
+            return
+
+        title = target_entry.title
+        link = target_entry.link
+        print(f"선택된 뉴스 제목: {title}")
+
+        print("2. Gemini AI 요약 생성 시작...")
+        if not GEMINI_API_KEY:
+            raise ValueError("GEMINI_API_KEY가 설정되지 않았습니다!")
             
-    if not target_entry:
-        print("새로운 기사 없음 (모두 이미 보낸 기사)")
-        return
-
-    title = target_entry.title
-    link = target_entry.link
-
-    client = genai.Client(api_key=GEMINI_API_KEY)
-    
-    prompt = f"""
+        client = genai.Client(api_key=GEMINI_API_KEY)
+        
+        prompt = f"""
 너는 감각 있고 트렌디한 크립토 전문 텔레그램 채널 운영자야. 아래 최신 뉴스를 바탕으로 핵심만 짚어서 요약해줘.
 
 [작성 스타일 및 규칙]
@@ -95,29 +106,25 @@ def main():
 링크: {link}
 """
 
-    max_retries = 3
-    response = None
-    
-    for attempt in range(max_retries):
-        try:
-            response = client.models.generate_content(
-                model="gemini-1.5-flash",
-                contents=prompt,
-            )
-            break
-        except (ServerError, APIError) as e:
-            if attempt < max_retries - 1:
-                time.sleep(5)
-            else:
-                raise e
+        response = client.models.generate_content(
+            model="gemini-1.5-flash",
+            contents=prompt,
+        )
 
-    if response:
-        result_text = response.text
-        if "[기사 원문 보러가기]" not in result_text:
-            result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
-        send_telegram(result_text)
-        save_sent_title(title)
-        print("전송 완료!")
+        if response and response.text:
+            result_text = response.text
+            if "[기사 원문 보러가기]" not in result_text:
+                result_text += f"\n\n🔗 [기사 원문 보러가기]({link})"
+            
+            print("3. 텔레그램 전송 중...")
+            send_telegram(result_text)
+            save_sent_title(title)
+            print("모든 작업 완료!")
+
+    except Exception as e:
+        print("🚨 상세 에러 발생 내용:")
+        traceback.print_exc()
+        raise e
 
 if __name__ == "__main__":
     main()
