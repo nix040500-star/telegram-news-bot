@@ -30,13 +30,14 @@ def send_telegram(text):
 
 def main():
     try:
-        print("--- 크립토 실시간 뉴스 봇 실행 ---")
+        print("--- 구글 암호화폐 뉴스 봇 실행 ---")
         
         if not GEMINI_API_KEY:
             print("🚨 에러: GEMINI_API_KEY가 설정되지 않았습니다!")
             return
 
-        print("1. 구글 뉴스 RSS 실시간 수집 중...")
+        print("1. 지정된 구글 뉴스 검색 페이지 RSS 수집 중...")
+        # 보내주신 검색 페이지 주소의 쿼리 규격과 동일한 RSS 엔드포인트 적용
         keyword = urllib.parse.quote("암호화폐")
         rss_url = f"https://news.google.com/rss/search?q={keyword}&hl=ko&gl=KR&ceid=KR:ko"
         
@@ -52,7 +53,7 @@ def main():
             print("수집된 뉴스 없음")
             return
 
-        # 가장 최신 뉴스 강제 포착
+        # 가장 최신 뉴스 포착
         target_entry = feed.entries[0]
         title = target_entry.title
         link = target_entry.link
@@ -62,7 +63,7 @@ def main():
         print("2. Gemini AI 스마트폰 맞춤형 압축 요약 생성 중...")
         genai.configure(api_key=GEMINI_API_KEY)
         
-        # 📱 휴대폰 화면에 스크롤 없이 한눈에 들어오도록 극단적으로 압축하는 핵심 프롬프트
+        # 휴대폰 화면에 스크롤 없이 한눈에 들어오도록 압축하는 프롬프트
         prompt = f"""
 너는 트렌디한 크립토 채널 운영자야. 아래 뉴스를 스마트폰 푸시 알림이나 화면으로 볼 때 **스크롤 없이 한눈에 쏙 들어오도록 아주 짧고 강렬하게** 요약해줘.
 
