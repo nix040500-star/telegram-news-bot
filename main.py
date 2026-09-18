@@ -355,9 +355,11 @@ def main():
         # =================================================
 
         query = (
-            "코인 OR 비트코인 OR "
-            "이더리움 OR 리플 OR "
-            "XRP OR 암호화폐"
+            "코인 OR 암호화폐 OR 가상자산 OR "
+            "비트코인 OR BTC OR 이더리움 OR ETH OR "
+            "리플 OR XRP OR 도지코인 OR 도지 OR DOGE OR "
+            "스테이블코인 OR USDT OR ETF OR SEC OR "
+            "연준 OR Fed OR FOMC OR 연준 의장 OR 금리 OR 파월"
         )
 
         keyword = urllib.parse.quote(
