@@ -212,16 +212,29 @@ def titles_are_same(a, b):
     if a == b:
         return True
 
-    ratio = SequenceMatcher(None, a, b).ratio()
-    if ratio >= 0.90:
+    # 다른 언론사가 같은 사건을 조금 다르게 쓴 경우까지 중복으로 판단
+    if SequenceMatcher(None, a, b).ratio() >= 0.78:
         return True
 
-    aw = set(a.split())
-    bw = set(b.split())
+    stopwords = {
+        "및", "등", "관련", "대한", "통해", "위해", "에서", "으로",
+        "한다", "발표", "전망", "가능성", "the", "a", "an", "to",
+        "of", "in", "on", "for", "and", "with", "as", "is", "are",
+        "says", "said"
+    }
+    aw = {x for x in a.split() if len(x) >= 2 and x not in stopwords}
+    bw = {x for x in b.split() if len(x) >= 2 and x not in stopwords}
     if not aw or not bw:
         return False
-    overlap = len(aw & bw) / max(1, min(len(aw), len(bw)))
-    return overlap >= 0.88 and min(len(aw), len(bw)) >= 5
+
+    common = aw & bw
+    overlap_small = len(common) / min(len(aw), len(bw))
+    overlap_union = len(common) / len(aw | bw)
+
+    return (
+        (len(common) >= 3 and overlap_small >= 0.60)
+        or (len(common) >= 4 and overlap_union >= 0.45)
+    )
 
 
 def clean_gemini_text(text):
@@ -380,10 +393,8 @@ def main():
             continue
         if guid_key and guid_key in current_guids:
             continue
-        if normalize_title(item["title"]) in {
-            normalize_title(old) for old in current_titles
-        }:
-            print("⏭️ 다른 소스 동일 제목 기사:", item["title"])
+        if any(titles_are_same(item["title"], old) for old in current_titles):
+            print("⏭️ 다른 소스 동일/유사 뉴스:", item["title"])
             continue
 
         # Resolve only after cheap duplicate checks.
