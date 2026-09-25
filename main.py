@@ -23,8 +23,8 @@ PROMO_KST_HOURS = {0, 6, 12, 18}
 PROMO_STATE_PREFIX = "PROMO_SLOT:"
 TRON_GUIDE_STATE_PREFIX = "TRON_GUIDE_SLOT:"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROMO_IMAGE_PATH = os.path.join(BASE_DIR, "scan_guard.png")
-TRON_GUIDE_IMAGE_PATH = os.path.join(BASE_DIR, "tron_guide.png")
+PROMO_IMAGE_PATH = os.path.join(BASE_DIR, "지갑보안검사 메뉴얼.png")
+TRON_GUIDE_IMAGE_PATH = os.path.join(BASE_DIR, "트론 충전 메뉴얼.png")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -300,7 +300,7 @@ def get_kst_promo_slot():
     now_kst = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9)))
     if now_kst.hour not in PROMO_KST_HOURS:
         return None
-    # 예약 시각 직후 20분 안에서만 허용. 같은 슬롯은 sent_urls.txt 기록으로 1회만 전송.
+    # GitHub Actions 20분 주기 기준: 정각 실행(:00)만 이 구간에 들어온다.
     if now_kst.minute >= 20:
         return None
     return now_kst.strftime("%Y-%m-%d-%H")
@@ -369,7 +369,7 @@ def send_usdt_scan_guard_promo():
                 "caption": caption,
                 "parse_mode": "Markdown",
             },
-            files={"photo": ("scan_guard.png", image_file, "image/png")},
+            files={"photo": ("지갑보안검사 메뉴얼.png", image_file, "image/png")},
             timeout=60,
         )
         image_file.close()
@@ -408,7 +408,7 @@ def send_tron_guide_promo():
         r = requests.post(
             api_url,
             data={"chat_id": TELEGRAM_CHAT_ID},
-            files={"photo": ("tron_guide.png", image_file, "image/png")},
+            files={"photo": ("트론 충전 메뉴얼.png", image_file, "image/png")},
             timeout=60,
         )
         image_file.close()
