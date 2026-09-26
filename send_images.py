@@ -1,7 +1,7 @@
 import os
 import requests
 
-BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+BOT_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 IMAGES = [
@@ -29,8 +29,6 @@ https://hig.kr/usdt-security"""
     }
 ]
 
-# 실행될 때마다 이미지 1장만 선택
-# GitHub Actions에서 IMAGE_INDEX를 0 또는 1로 지정 가능
 index = int(os.environ.get("IMAGE_INDEX", "0"))
 item = IMAGES[index % len(IMAGES)]
 
