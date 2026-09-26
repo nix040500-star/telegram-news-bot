@@ -2,9 +2,12 @@ name: Send Telegram Images
 
 on:
   schedule:
-    # 한국시간 00시 / 06시 / 12시 / 18시
-    - cron: "0 0,06,12,18 * * *"
+    # GitHub Actions cron은 UTC 기준
+    # 한국/일본시간(KST/JST) 00:00 / 06:00 / 12:00 / 18:00
+    # UTC 기준 15:00 / 21:00 / 03:00 / 09:00
+    - cron: "0 3,9,15,21 * * *"
 
+  # 수동 테스트 실행 가능
   workflow_dispatch:
 
 jobs:
@@ -12,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
