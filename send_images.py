@@ -1,12 +1,26 @@
 import os
+import glob
 import requests
 
 BOT_TOKEN = os.environ["TELEGRAM_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
+# 이미지 파일 자동 검색
+def find_image(keyword):
+    files = glob.glob("*.png") + glob.glob("*.jpg") + glob.glob("*.jpeg")
+    for file in files:
+        if keyword in file:
+            return file
+    raise FileNotFoundError(
+        f"'{keyword}' 이미지 파일을 찾을 수 없습니다. 현재 파일: {files}"
+    )
+
+wallet_image = find_image("지갑보안검사")
+tron_image = find_image("트론충전")
+
 IMAGES = [
     {
-        "file": "지갑보안검사 메뉴얼.png",
+        "file": wallet_image,
         "caption": """USDT 스캔 가드(USDT SCAN GUARD)
 
 빠르고 안전한 디지털 자산 보안 관리
@@ -20,7 +34,7 @@ IMAGES = [
 https://hig.kr/usdt-security"""
     },
     {
-        "file": "트론충전 메뉴얼.png",
+        "file": tron_image,
         "caption": """TRON (트론) 충전 가이드
 
 빠르고 저렴한 글로벌 블록체인 네트워크
@@ -29,8 +43,23 @@ https://hig.kr/usdt-security"""
     }
 ]
 
-index = int(os.environ.get("IMAGE_INDEX", "0"))
-item = IMAGES[index % len(IMAGES)]
+# 실행 시간(KST/JST)에 따라 이미지 선택
+# 00시, 12시 = 지갑보안검사
+# 06시, 18시 = 트론충전
+from datetime import datetime, timezone, timedelta
+
+KST = timezone(timedelta(hours=9))
+hour = datetime.now(KST).hour
+
+if hour in [0, 12]:
+    index = 0
+elif hour in [6, 18]:
+    index = 1
+else:
+    # 수동 테스트 실행 시 첫 번째 이미지 전송
+    index = 0
+
+item = IMAGES[index]
 
 url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
@@ -39,12 +68,17 @@ with open(item["file"], "rb") as photo:
         url,
         data={
             "chat_id": CHAT_ID,
-            "caption": item["caption"]
+            "caption": item["caption"],
+            "parse_mode": "HTML"
         },
-        files={"photo": photo},
+        files={
+            "photo": photo
+        },
         timeout=30
     )
 
-response.raise_for_status()
+if not response.ok:
+    print("Telegram 오류:", response.text)
+    response.raise_for_status()
 
-print(f"전송 완료: {item['file']}")
+print("전송 성공:", item["file"])
