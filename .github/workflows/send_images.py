@@ -6,7 +6,7 @@ CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 
 API_URL = f"https://api.telegram.org/bot{TOKEN}/sendPhoto"
 
-# 1. 지갑보안검사 이미지 + 멘트
+# 지갑보안검사 이미지 + 멘트
 caption = """*USDT 스캔 가드(USDT SCAN GUARD)*
 
 빠르고 안전한 디지털 자산 보안 관리
@@ -32,12 +32,12 @@ with open("지갑보안검사 메뉴얼.png", "rb") as image:
     )
 
 if response.status_code != 200:
-    raise Exception(f"지갑보안검사 이미지 전송 실패: {response.text}")
+    raise Exception(f"지갑보안검사 전송 실패: {response.text}")
 
-print("지갑보안검사 이미지 + 멘트 전송 완료")
+print("지갑보안검사 전송 완료")
 
 
-# 2. 트론 충전 메뉴얼은 이미지만 전송
+# 트론충전 메뉴얼은 이미지만 전송
 with open("트론충전 메뉴얼.png", "rb") as image:
     response = requests.post(
         API_URL,
@@ -49,4 +49,4 @@ with open("트론충전 메뉴얼.png", "rb") as image:
 if response.status_code != 200:
     raise Exception(f"트론충전 메뉴얼 전송 실패: {response.text}")
 
-print("트론충전 메뉴얼 이미지 전송 완료")
+print("트론충전 메뉴얼 전송 완료")
