@@ -19,12 +19,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 SENT_FILE = "sent_urls.txt"
 MAX_ARTICLE_AGE_HOURS = 1
 
-PROMO_KST_HOURS = {0, 6, 12, 18}
-PROMO_STATE_PREFIX = "PROMO_SLOT:"
-TRON_GUIDE_STATE_PREFIX = "TRON_GUIDE_SLOT:"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-PROMO_IMAGE_PATH = os.path.join(BASE_DIR, "지갑보안검사 메뉴얼.png")
-TRON_GUIDE_IMAGE_PATH = os.path.join(BASE_DIR, "트론 충전 메뉴얼.png")
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -62,9 +56,6 @@ google_rss = (
 
 FEEDS = [
     ("Google News KR", google_rss, "google"),
-    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/", "crypto"),
-    ("Cointelegraph", "https://cointelegraph.com/rss", "crypto"),
-    ("Decrypt", "https://decrypt.co/feed", "crypto"),
     ("Federal Reserve - Monetary Policy", "https://www.federalreserve.gov/feeds/press_monetary.xml", "macro"),
     ("Federal Reserve - Speeches", "https://www.federalreserve.gov/feeds/speeches.xml", "macro"),
 ]
@@ -295,136 +286,6 @@ def send_telegram(text):
 
 
 
-def get_kst_promo_slot():
-    """한국시간 00:00 / 06:00 / 12:00 / 18:00 슬롯을 반환한다."""
-    now_kst = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9)))
-    if now_kst.hour not in PROMO_KST_HOURS:
-        return None
-    # GitHub Actions 20분 주기 기준: 정각 실행(:00)만 이 구간에 들어온다.
-    if now_kst.minute >= 20:
-        return None
-    return now_kst.strftime("%Y-%m-%d-%H")
-
-
-def promo_slot_already_sent(prefix, slot):
-    if not slot or not os.path.exists(SENT_FILE):
-        return False
-    marker = prefix + slot
-    try:
-        with open(SENT_FILE, "r", encoding="utf-8") as f:
-            return any(line.strip() == marker for line in f)
-    except Exception as e:
-        print("⚠️ 홍보 슬롯 기록 읽기 실패:", e)
-        return False
-
-
-def save_promo_slot(prefix, slot):
-    if not slot:
-        return False
-    marker = prefix + slot
-    try:
-        with open(SENT_FILE, "a", encoding="utf-8") as f:
-            f.write(marker + "\n")
-        return True
-    except Exception as e:
-        print("⚠️ 홍보 슬롯 기록 저장 실패:", e)
-        return False
-
-
-def send_usdt_scan_guard_promo():
-    """한국시간 00시, 06시, 12시, 18시에 슬롯당 1회 게시한다."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ Telegram 환경변수 없음 - 홍보 게시 생략")
-        return False
-
-    slot = get_kst_promo_slot()
-    if slot is None:
-        return False
-    if promo_slot_already_sent(PROMO_STATE_PREFIX, slot):
-        return False
-
-    if not os.path.exists(PROMO_IMAGE_PATH):
-        print("❌ 이미지 없음:", PROMO_IMAGE_PATH)
-        return False
-
-    caption = """*USDT 스캔 가드(USDT SCAN GUARD)*
-
-빠르고 안전한 디지털 자산 보안 관리
-
-• *보안 점검:* 자산 및 주소 안전성 실시간 확인
-• *위험 차단:* 잠재적 위협 요소 사전 예방
-• *체계적 보호:* 믿을 수 있는 디지털 자산 관리
-
-지갑의 위험을 미리 확인하고, 더 안전하게 보호하세요.
-
-[지갑 안전검사](https://hig.kr/cryptoguard)"""
-
-    api_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    try:
-        image_file = open(PROMO_IMAGE_PATH, "rb")
-        r = requests.post(
-            api_url,
-            data={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "caption": caption,
-                "parse_mode": "Markdown",
-            },
-            files={"photo": ("지갑보안검사 메뉴얼.png", image_file, "image/png")},
-            timeout=60,
-        )
-        image_file.close()
-        print("📣 USDT SCAN GUARD 홍보:", r.status_code)
-        if r.status_code != 200:
-            print("❌ 홍보 게시 실패:", r.text)
-            return False
-
-        if save_promo_slot(PROMO_STATE_PREFIX, slot):
-            print(f"✅ USDT SCAN GUARD 게시 완료: KST {slot}")
-        return True
-    except Exception as e:
-        print("❌ USDT SCAN GUARD 홍보 게시 오류:", e)
-        traceback.print_exc()
-        return False
-
-
-def send_tron_guide_promo():
-    """한국시간 00시, 06시, 12시, 18시에 슬롯당 1회 게시한다."""
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
-
-    slot = get_kst_promo_slot()
-    if slot is None:
-        return False
-    if promo_slot_already_sent(TRON_GUIDE_STATE_PREFIX, slot):
-        return False
-
-    if not os.path.exists(TRON_GUIDE_IMAGE_PATH):
-        print("❌ 이미지 없음:", TRON_GUIDE_IMAGE_PATH)
-        return False
-
-    api_url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
-    try:
-        image_file = open(TRON_GUIDE_IMAGE_PATH, "rb")
-        r = requests.post(
-            api_url,
-            data={"chat_id": TELEGRAM_CHAT_ID},
-            files={"photo": ("트론 충전 메뉴얼.png", image_file, "image/png")},
-            timeout=60,
-        )
-        image_file.close()
-        print("📘 TRON/USDT 안내 이미지:", r.status_code)
-        if r.status_code != 200:
-            print("❌ TRON/USDT 안내 이미지 게시 실패:", r.text)
-            return False
-
-        if save_promo_slot(TRON_GUIDE_STATE_PREFIX, slot):
-            print(f"✅ TRON/USDT 안내 이미지 게시 완료: KST {slot}")
-        return True
-    except Exception as e:
-        print("❌ TRON/USDT 안내 이미지 게시 오류:", e)
-        traceback.print_exc()
-        return False
-
 
 def fetch_all_entries():
     collected = []
@@ -490,10 +351,6 @@ def main():
     if not TELEGRAM_CHAT_ID:
         print("❌ TELEGRAM_CHAT_ID 없음")
         return
-
-    # 뉴스 게시 여부와 관계없이 6시간 주기의 홍보 게시를 별도로 확인한다.
-    send_usdt_scan_guard_promo()
-    send_tron_guide_promo()
 
     sent_items = load_sent_items()
     now = datetime.now(timezone.utc)
@@ -621,7 +478,12 @@ def main():
 - 투자 권유나 가격 예측을 하지 않는다.
 - 코인명, 기업명, 인물명, 중요한 수치와 날짜는 유지한다.
 - 연준·SEC·정부·정책 관련 내용은 사실 중심으로 중립적으로 작성한다.
-- 딱딱한 AI 문체보다 사람이 뉴스를 직접 정리해 전달하는 자연스러운 문체를 사용한다.
+- 실제 사람이 기사를 읽고 핵심 내용을 다시 정리해 전달하는 자연스러운 문체를 사용한다.
+- 기계적인 요약체, 보고서체, 번역투, 반복적인 문장 구조를 피한다.
+- 문장 길이와 연결 방식을 매번 조금씩 다르게 하고, 기사 흐름에 맞춰 자연스럽게 이어 쓴다.
+- 지나치게 딱딱한 표현보다 뉴스 채널 운영자가 직접 읽고 정리한 듯한 표현을 사용한다.
+- 과장하거나 개인적인 의견을 넣지 않고 기사에 있는 사실만 자연스럽게 전달한다.
+- 본문과 마지막 요약에 이모티콘이나 이모지를 사용하지 않는다.
 - URL은 절대로 작성하지 않는다.
 - '기사 원문 보러가기' 문구도 작성하지 않는다.
 
@@ -662,16 +524,16 @@ def main():
                 continue
 
             closing_labels = [
-                "🔎 요약하자면..",
-                "🔎 짧게 말씀드리면..",
-                "🔎 한 줄로 말씀드리면..",
-                "🔎 두 줄로 짧게 말씀드리면..",
-                "🔎 쉽게 말씀드리면..",
-                "🔎 간단히 정리하면..",
-                "🔎 핵심만 말씀드리면..",
-                "🔎 결론적으로 보면..",
-                "🔎 지금 상황만 보면..",
-                "🔎 쉽게 풀어보면..",
+                "요약하자면..",
+                "짧게 말씀드리면..",
+                "한 줄로 말씀드리면..",
+                "두 줄로 짧게 말씀드리면..",
+                "쉽게 말씀드리면..",
+                "간단히 정리하면..",
+                "핵심만 말씀드리면..",
+                "결론적으로 보면..",
+                "지금 상황만 보면..",
+                "쉽게 풀어보면..",
             ]
 
             # Gemini의 마지막 비어있지 않은 줄을 핵심 한 문장으로 보고
@@ -692,7 +554,7 @@ def main():
                 text = "\n".join(lines).strip()
 
             safe_link = escape_markdown_url(link)
-            text += f"\n\n🔗 [기사 원문 보러가기]({safe_link})"
+            text += f"\n\n[기사 원문 보러가기]({safe_link})"
 
             if not send_telegram(text):
                 print("❌ Telegram 전송 실패")
