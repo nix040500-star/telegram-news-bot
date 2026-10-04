@@ -2,11 +2,12 @@ name: Crypto Live Price Bot
 
 on:
   schedule:
-    # 한국시간(KST) 기준 00:00 / 06:00 / 12:00 / 18:00
-    - cron: '0 0,6,12,18 * * *'
-      timezone: 'Asia/Seoul'
+    # 한국시간(KST) 00:00 / 06:00 / 12:00 / 18:00
+    # GitHub Actions cron은 UTC 기준이므로
+    # UTC 15:00 / 21:00 / 03:00 / 09:00으로 설정
+    - cron: '0 3,9,15,21 * * *'
 
-  # GitHub에서 수동 실행도 가능
+  # GitHub에서 수동 실행 가능
   workflow_dispatch:
 
 jobs:
