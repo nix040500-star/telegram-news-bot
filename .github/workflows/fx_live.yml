@@ -3,10 +3,10 @@ name: Global FX Brief Bot
 on:
   schedule:
     # 한국시간(KST) 기준 매일 00:00 / 06:00 / 12:00 / 18:00
-    - cron: '0 0,6,12,18 * * *'
-      timezone: 'Asia/Seoul'
+    # GitHub Actions cron은 UTC 기준
+    - cron: '0 3,9,15,21 * * *'
 
-  # 필요할 때 GitHub에서 수동 실행 가능
+  # GitHub에서 필요할 때 수동 실행
   workflow_dispatch:
 
 jobs:
