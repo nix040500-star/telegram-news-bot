@@ -2,12 +2,17 @@ name: Global FX Brief Bot
 
 on:
   schedule:
-    - cron: '0 */3 * * *'  # 3시간마다 자동 실행
+    # 한국시간(KST) 기준 매일 00:00 / 06:00 / 12:00 / 18:00
+    - cron: '0 0,6,12,18 * * *'
+      timezone: 'Asia/Seoul'
+
+  # 필요할 때 GitHub에서 수동 실행 가능
   workflow_dispatch:
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -21,7 +26,7 @@ jobs:
         run: |
           pip install requests pytz
 
-      - name: Run bot
+      - name: Run Global FX Bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
