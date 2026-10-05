@@ -44,7 +44,7 @@ MAX_ARTICLE_AGE_HOURS = 2
 MAX_ARTICLES_PER_RUN = 2
 
 # 제목이 이 정도 이상 비슷하면 같은 뉴스로 판단
-TITLE_SIMILARITY = 0.86
+TITLE_SIMILARITY = 0.78
 
 # 기록 파일 최대 보관 개수
 MAX_SENT_HISTORY = 5000
@@ -189,6 +189,12 @@ FEEDS = [
         "https://www.federalreserve.gov/feeds/speeches.xml",
         "macro"
     ),
+    ("The Block", "https://www.theblock.co/rss.xml"),
+    ("Decrypt", "https://decrypt.co/feed"),
+    ("Blockworks", "https://blockworks.co/feed"),
+    ("Bitcoin Magazine", "https://bitcoinmagazine.com/.rss/full/"),
+    ("CryptoSlate", "https://cryptoslate.com/feed/"),
+    ("Reuters Crypto via Google News", "https://news.google.com/rss/search?q=when%3A24h+site%3Areuters.com+%28bitcoin+OR+ethereum+OR+crypto+OR+cryptocurrency+OR+stablecoin+OR+SEC+OR+Federal+Reserve%29&hl=en-US&gl=US&ceid=US%3Aen"),
 ]
 
 
@@ -234,6 +240,32 @@ def normalize_title(title):
         title
     ).strip()
 
+
+
+def event_tokens(title):
+    """Normalize a headline into event-significant tokens for cross-source dedupe."""
+    t = normalize_title(title).lower()
+    t = re.sub(r"https?://\S+|www\.\S+", " ", t)
+    t = re.sub(r"[^0-9a-zA-Z가-힣\s]", " ", t)
+    stop = {
+        "the","a","an","and","or","to","of","in","on","for","with","as","at","by","from",
+        "is","are","was","were","be","been","after","amid","over","into","says","say",
+        "news","report","reports","latest","update","today",
+        "대한","관련","통해","위해","에서","으로","하고","한다","밝혀","발표","소식"
+    }
+    return {x for x in t.split() if len(x) > 1 and x not in stop}
+
+def same_event_title(a, b):
+    """Conservative same-event detector: catches rewritten headlines across outlets."""
+    if same_event_title(a, b):
+        return True
+    ta, tb = event_tokens(a), event_tokens(b)
+    if not ta or not tb:
+        return False
+    common = ta & tb
+    # Require meaningful shared event vocabulary; avoid aggressive false positives.
+    overlap = len(common) / max(1, min(len(ta), len(tb)))
+    return len(common) >= 3 and overlap >= 0.60
 
 def title_similarity(a, b):
 
