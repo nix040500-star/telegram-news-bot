@@ -741,7 +741,10 @@ def build_news_prompt(item):
 - 영어 원문을 그대로 복붙하지 않는다.
 - URL, 'RSS', 'AI 요약', '한도 초과' 같은 내부 문구는 출력하지 않는다.
 - 존댓말/이모지/투자권유를 사용하지 않는다.
-- 출처명은 본문에 억지로 넣지 않는다.
+- 출처명은 텔레그램 출력에 절대 표시하지 않는다.
+- '출처:', '실제 출처:', 'RSS', 'AI 요약', '한도 초과', '자동 전송' 같은 내부 문구를 절대 출력하지 않는다.
+- 제목은 원문의 핵심 사건·수치·기업·자산명을 살려 구체적인 한국어 제목으로 작성한다.
+- 본문은 단순히 '관련 최신 기사다'라고 끝내지 말고, 제공된 기사 내용에서 확인되는 사실을 3~5문장으로 구체적으로 설명한다.
 
 [실제 출처]
 {item.get("publisher") or item.get("source") or ""}
@@ -770,7 +773,7 @@ def generate_groq_summary(item):
                 "Content-Type": "application/json",
             },
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": "openai/gpt-oss-120b",
                 "messages": [
                     {
                         "role": "user",
@@ -796,16 +799,14 @@ def generate_groq_summary(item):
 
 def fallback_summary(item):
     """
-    Gemini가 막혀도 RSS 주소/영어 원문을 그대로 노출하지 않고
-    깔끔한 한국어 형식으로 전송한다.
+    Gemini와 보조 AI가 모두 사용 불가일 때의 마지막 안전장치.
+    출처/RSS/AI 오류 문구는 텔레그램에 절대 노출하지 않는다.
     """
     title = clean_text(item.get("title", ""))
     summary = clean_text(item.get("summary", ""))
-
-    # 제목 뒤 언론사 꼬리표 제거
     title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
 
-    # 자주 나오는 시장 용어를 한국어로 치환
+    # 영어 원문을 그대로 게시하지 않기 위한 최소 용어 변환
     replacements = [
         (r"(?i)\bcore CPI\b", "근원 소비자물가"),
         (r"(?i)\bCPI\b", "소비자물가지수"),
@@ -818,46 +819,30 @@ def fallback_summary(item):
         (r"(?i)\bbitcoin\b", "비트코인"),
         (r"(?i)\bethereum\b", "이더리움"),
         (r"(?i)\bcrypto(?:currency)?\b", "암호화폐"),
-        (r"(?i)\bstocks?\b", "주식"),
         (r"(?i)\bNasdaq\b", "나스닥"),
-        (r"(?i)\bS&P 500\b", "S&P 500"),
         (r"(?i)\bTreasury yields?\b", "미 국채금리"),
         (r"(?i)\bWall Street\b", "미국 증시"),
     ]
-
     ko_title = title
     for pattern, repl in replacements:
         ko_title = re.sub(pattern, repl, ko_title)
 
-    # 영어가 많이 남은 제목은 원문을 그대로 보여주지 않고
-    # 기사 종류에 맞는 안전한 한국어 제목으로 표시
-    ascii_letters = len(re.findall(r"[A-Za-z]", ko_title))
-    korean_letters = len(re.findall(r"[가-힣]", ko_title))
-    if ascii_letters > max(12, korean_letters * 2):
-        feed_type = item.get("feed_type", "")
-        if feed_type == "crypto":
-            ko_title = "암호화폐 시장 주요 뉴스"
-        elif feed_type == "stock":
-            ko_title = "미국 증시 주요 뉴스"
-        elif feed_type == "macro":
-            ko_title = "미국 경제·금리 주요 뉴스"
-        else:
-            ko_title = "글로벌 금융시장 주요 뉴스"
+    # 번역이 불완전한 영어 제목은 그대로 노출하지 않는다.
+    if len(re.findall(r"[A-Za-z]", ko_title)) > max(12, len(re.findall(r"[가-힣]", ko_title)) * 2):
+        kind = item.get("feed_type", "")
+        ko_title = {
+            "crypto": "암호화폐 시장 주요 뉴스",
+            "stock": "미국 증시 주요 뉴스",
+            "macro": "미국 경제·금리 주요 뉴스",
+        }.get(kind, "글로벌 금융시장 주요 뉴스")
 
-    # RSS 본문도 영어 원문 그대로 노출하지 않음
-    # 확인 가능한 최소 정보만 한국어 안내문으로 구성
-    source = clean_text(item.get("source", ""))
-    if item.get("feed_type") == "crypto":
-        body = "암호화폐 시장과 관련된 최신 주요 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
-    elif item.get("feed_type") == "stock":
-        body = "미국 증시와 주요 기업에 관련된 최신 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
-    elif item.get("feed_type") == "macro":
-        body = "미국 경제·금리·물가와 관련된 최신 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
-    else:
-        body = "금융시장과 관련된 최신 주요 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
-
-    if source:
-        body += f"\n출처: {source}"
+    # AI 둘 다 막힌 경우에도 내부 상태/출처를 노출하지 않는다.
+    kind = item.get("feed_type", "")
+    body = {
+        "crypto": "암호화폐 시장에 영향을 줄 수 있는 주요 소식이 새로 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
+        "stock": "미국 증시와 주요 기업에 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
+        "macro": "미국 경제·금리·물가와 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
+    }.get(kind, "금융시장과 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.")
 
     return f"{ko_title}\n\n{body}"
 
