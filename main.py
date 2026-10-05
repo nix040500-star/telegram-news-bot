@@ -17,7 +17,7 @@ from google import genai
 
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 KST = timezone(timedelta(hours=9))
 
@@ -696,8 +696,10 @@ def importance_score(item):
 # Gemini
 # =========================================================
 
-client = genai.Client(
-    api_key=GEMINI_API_KEY
+client = (
+    genai.Client(api_key=GEMINI_API_KEY)
+    if GEMINI_API_KEY
+    else None
 )
 
 
@@ -725,7 +727,41 @@ def clean_gemini_text(text):
     return text.strip()
 
 
+def fallback_summary(item):
+    """
+    Gemini가 막혀도 텔레그램 전송이 멈추지 않게 하는 안전장치.
+    기사에 실제로 들어있는 제목/RSS 내용만 사용한다.
+    """
+    title = clean_text(item.get("title", ""))
+    summary = clean_text(item.get("summary", ""))
+
+    # RSS에 언론사명이 제목 뒤에 붙는 경우 보기 좋게 제거
+    clean_title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
+    if not clean_title:
+        clean_title = title or "시장 주요 뉴스"
+
+    # RSS 설명이 있으면 너무 길지 않게 사용
+    body = summary
+    if body:
+        body = re.sub(r"\s+", " ", body).strip()
+        if len(body) > 700:
+            body = body[:697].rstrip() + "..."
+    else:
+        body = "원문 제목 기준으로 확인된 주요 시장 뉴스다."
+
+    return (
+        f"{clean_title}\n\n"
+        f"{body}\n\n"
+        f"※ AI 요약 한도 초과로 RSS 원문 정보를 바탕으로 자동 전송"
+    )
+
+
 def generate_summary(item):
+    # 키가 없거나 Gemini를 사용할 수 없어도 뉴스는 계속 전송
+    if client is None:
+        print("Gemini API 키 없음 - 기본 요약으로 전송")
+        return fallback_summary(item)
+
     prompt = f"""
 너는 한국의 코인·미국증시 전문 뉴스방에서 일하는 최고 수준의 뉴스 에디터다.
 
@@ -784,22 +820,29 @@ def generate_summary(item):
                 contents=prompt,
             )
 
-            text = getattr(
-                result,
-                "text",
-                "",
-            )
+            result_text = getattr(result, "text", "")
 
-            if text:
-                return clean_gemini_text(text)
+            if result_text:
+                return clean_gemini_text(result_text)
 
         except Exception as e:
+            error_text = str(e)
             print(
                 f"Gemini 실패 {attempt + 1}/3:",
-                str(e)[:200],
+                error_text[:200],
             )
 
-    return ""
+            # 쿼터 초과는 재시도해도 바로 해결되지 않으므로 즉시 fallback
+            if (
+                "429" in error_text
+                or "RESOURCE_EXHAUSTED" in error_text
+                or "quota" in error_text.lower()
+            ):
+                print("Gemini 쿼터 초과 - 기본 요약으로 즉시 전환")
+                return fallback_summary(item)
+
+    print("Gemini 요약 최종 실패 - 기본 요약으로 전환")
+    return fallback_summary(item)
 
 
 # =========================================================
@@ -1119,12 +1162,14 @@ def main():
             importance_score(item),
         )
 
-        text = generate_summary(item)
+        try:
+            text = generate_summary(item)
+        except Exception as e:
+            print("요약 처리 오류 - 기본 요약으로 전환:", str(e)[:200])
+            text = fallback_summary(item)
 
         if not text:
-            print(
-                "Gemini 요약 실패 - 전송 안 함"
-            )
+            print("요약 생성 실패 - 전송 안 함")
             continue
 
         try:
