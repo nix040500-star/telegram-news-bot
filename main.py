@@ -18,6 +18,7 @@ from google import genai
 TELEGRAM_TOKEN = os.environ["TELEGRAM_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 KST = timezone(timedelta(hours=9))
 
@@ -727,6 +728,72 @@ def clean_gemini_text(text):
     return text.strip()
 
 
+def build_news_prompt(item):
+    return f"""
+너는 한국의 코인·미국증시 전문 뉴스방에서 일하는 뉴스 에디터다.
+아래 기사 정보만 사용해서 텔레그램용 한국어 뉴스를 작성한다.
+
+[형식]
+- 첫 줄: 구체적이고 자연스러운 한국어 제목
+- 본문: 3~5문장
+- 마지막 문장: 이 뉴스가 코인시장 또는 미국증시에 왜 중요한지 설명
+- 기사에 없는 사실/수치/전망은 절대 만들지 않는다.
+- 영어 원문을 그대로 복붙하지 않는다.
+- URL, 'RSS', 'AI 요약', '한도 초과' 같은 내부 문구는 출력하지 않는다.
+- 존댓말/이모지/투자권유를 사용하지 않는다.
+- 출처명은 본문에 억지로 넣지 않는다.
+
+[실제 출처]
+{item.get("publisher") or item.get("source") or ""}
+
+[원문 제목]
+{item.get("title", "")}
+
+[기사 내용]
+{clean_text(item.get("summary", ""))[:4500]}
+"""
+
+
+def generate_groq_summary(item):
+    """
+    Gemini 쿼터 초과 시 GROQ_API_KEY가 있으면 두 번째 AI로 자동 전환.
+    별도 SDK 없이 requests만 사용한다.
+    """
+    if not GROQ_API_KEY:
+        return ""
+
+    try:
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {GROQ_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": build_news_prompt(item),
+                    }
+                ],
+                "temperature": 0.2,
+                "max_tokens": 700,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        result = data["choices"][0]["message"]["content"]
+        if result:
+            print("보조 AI 요약 성공")
+            return clean_gemini_text(result)
+    except Exception as e:
+        print("보조 AI 실패:", str(e)[:200])
+
+    return ""
+
+
 def fallback_summary(item):
     """
     Gemini가 막혀도 RSS 주소/영어 원문을 그대로 노출하지 않고
@@ -797,7 +864,11 @@ def fallback_summary(item):
 def generate_summary(item):
     # 키가 없거나 Gemini를 사용할 수 없어도 뉴스는 계속 전송
     if client is None:
-        print("Gemini API 키 없음 - 기본 요약으로 전송")
+        print("Gemini API 키 없음 - 보조 AI로 전환")
+        alt_text = generate_groq_summary(item)
+        if alt_text:
+            return alt_text
+        print("보조 AI 사용 불가 - 기본 요약으로 전송")
         return fallback_summary(item)
 
     prompt = f"""
@@ -876,10 +947,18 @@ def generate_summary(item):
                 or "RESOURCE_EXHAUSTED" in error_text
                 or "quota" in error_text.lower()
             ):
-                print("Gemini 쿼터 초과 - 기본 요약으로 즉시 전환")
+                print("Gemini 쿼터 초과 - 보조 AI로 전환")
+                alt_text = generate_groq_summary(item)
+                if alt_text:
+                    return alt_text
+                print("보조 AI 사용 불가 - 기본 요약으로 전환")
                 return fallback_summary(item)
 
-    print("Gemini 요약 최종 실패 - 기본 요약으로 전환")
+    print("Gemini 요약 최종 실패 - 보조 AI로 전환")
+    alt_text = generate_groq_summary(item)
+    if alt_text:
+        return alt_text
+    print("보조 AI 사용 불가 - 기본 요약으로 전환")
     return fallback_summary(item)
 
 
