@@ -729,32 +729,70 @@ def clean_gemini_text(text):
 
 def fallback_summary(item):
     """
-    Gemini가 막혀도 텔레그램 전송이 멈추지 않게 하는 안전장치.
-    기사에 실제로 들어있는 제목/RSS 내용만 사용한다.
+    Gemini가 막혀도 RSS 주소/영어 원문을 그대로 노출하지 않고
+    깔끔한 한국어 형식으로 전송한다.
     """
     title = clean_text(item.get("title", ""))
     summary = clean_text(item.get("summary", ""))
 
-    # RSS에 언론사명이 제목 뒤에 붙는 경우 보기 좋게 제거
-    clean_title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
-    if not clean_title:
-        clean_title = title or "시장 주요 뉴스"
+    # 제목 뒤 언론사 꼬리표 제거
+    title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
 
-    # RSS 설명이 있으면 너무 길지 않게 사용
-    body = summary
-    if body:
-        body = re.sub(r"\s+", " ", body).strip()
-        if len(body) > 700:
-            body = body[:697].rstrip() + "..."
+    # 자주 나오는 시장 용어를 한국어로 치환
+    replacements = [
+        (r"(?i)\bcore CPI\b", "근원 소비자물가"),
+        (r"(?i)\bCPI\b", "소비자물가지수"),
+        (r"(?i)\binflation\b", "인플레이션"),
+        (r"(?i)\bfederal reserve\b", "미 연준"),
+        (r"(?i)\bFed\b", "연준"),
+        (r"(?i)\binterest rates?\b", "금리"),
+        (r"(?i)\brate cuts?\b", "금리 인하"),
+        (r"(?i)\brate hikes?\b", "금리 인상"),
+        (r"(?i)\bbitcoin\b", "비트코인"),
+        (r"(?i)\bethereum\b", "이더리움"),
+        (r"(?i)\bcrypto(?:currency)?\b", "암호화폐"),
+        (r"(?i)\bstocks?\b", "주식"),
+        (r"(?i)\bNasdaq\b", "나스닥"),
+        (r"(?i)\bS&P 500\b", "S&P 500"),
+        (r"(?i)\bTreasury yields?\b", "미 국채금리"),
+        (r"(?i)\bWall Street\b", "미국 증시"),
+    ]
+
+    ko_title = title
+    for pattern, repl in replacements:
+        ko_title = re.sub(pattern, repl, ko_title)
+
+    # 영어가 많이 남은 제목은 원문을 그대로 보여주지 않고
+    # 기사 종류에 맞는 안전한 한국어 제목으로 표시
+    ascii_letters = len(re.findall(r"[A-Za-z]", ko_title))
+    korean_letters = len(re.findall(r"[가-힣]", ko_title))
+    if ascii_letters > max(12, korean_letters * 2):
+        feed_type = item.get("feed_type", "")
+        if feed_type == "crypto":
+            ko_title = "암호화폐 시장 주요 뉴스"
+        elif feed_type == "stock":
+            ko_title = "미국 증시 주요 뉴스"
+        elif feed_type == "macro":
+            ko_title = "미국 경제·금리 주요 뉴스"
+        else:
+            ko_title = "글로벌 금융시장 주요 뉴스"
+
+    # RSS 본문도 영어 원문 그대로 노출하지 않음
+    # 확인 가능한 최소 정보만 한국어 안내문으로 구성
+    source = clean_text(item.get("source", ""))
+    if item.get("feed_type") == "crypto":
+        body = "암호화폐 시장과 관련된 최신 주요 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
+    elif item.get("feed_type") == "stock":
+        body = "미국 증시와 주요 기업에 관련된 최신 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
+    elif item.get("feed_type") == "macro":
+        body = "미국 경제·금리·물가와 관련된 최신 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
     else:
-        body = "원문 제목 기준으로 확인된 주요 시장 뉴스다."
+        body = "금융시장과 관련된 최신 주요 기사다. 세부 내용은 아래 원문 보기에서 확인할 수 있다."
 
-    return (
-        f"{clean_title}\n\n"
-        f"{body}\n\n"
-        f"※ AI 요약 한도 초과로 RSS 원문 정보를 바탕으로 자동 전송"
-    )
+    if source:
+        body += f"\n출처: {source}"
 
+    return f"{ko_title}\n\n{body}"
 
 def generate_summary(item):
     # 키가 없거나 Gemini를 사용할 수 없어도 뉴스는 계속 전송
