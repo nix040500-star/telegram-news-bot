@@ -40,7 +40,7 @@ SENT_FILE = "sent_urls.txt"
 # GitHub Actions 지연이나 RSS 발행 지연을 감안한 여유값
 MAX_ARTICLE_AGE_HOURS = 2
 
-# ★ 한 번 실행할 때 최대 2개
+#  한 번 실행할 때 최대 2개
 MAX_ARTICLES_PER_RUN = 2
 
 # 제목이 이 정도 이상 비슷하면 같은 뉴스로 판단
@@ -374,7 +374,7 @@ def resolve_url(url):
     except Exception as e:
 
         print(
-            "⚠️ URL 확인 실패:",
+            " URL 확인 실패:",
             str(e)[:150]
         )
 
@@ -443,7 +443,7 @@ def load_sent():
     except Exception as e:
 
         print(
-            "⚠️ 전송 기록 읽기 실패:",
+            " 전송 기록 읽기 실패:",
             e
         )
 
@@ -475,7 +475,7 @@ def save_sent(sent_items):
     except Exception as e:
 
         print(
-            "⚠️ 전송 기록 저장 실패:",
+            " 전송 기록 저장 실패:",
             e
         )
 
@@ -674,9 +674,11 @@ def generate_summary(item):
 
 [작성 규칙]
 - 첫 줄은 한국어 기사 제목
-- 제목 아래 본문은 줄바꿈 기준 5~7줄로 작성한다
-- 기사마다 5줄, 6줄, 7줄 중 자연스럽게 분량을 달리한다
+- 제목 아래 본문은 줄바꿈 기준 4~6줄로 작성한다
+- 기사마다 4줄, 5줄, 6줄 중 자연스럽게 분량을 달리한다
 - 핵심 내용만 간결하게 작성한다
+- 한눈에 이해되도록 중요한 사실부터 쉬운 문장으로 정리한다
+- 같은 뜻의 반복, 불필요한 배경설명, 과한 수식어는 제거한다
 - 마지막 줄은 기사 핵심을 짧게 정리한다
 - 기사에 없는 사실이나 수치를 만들지 않는다
 - 영어 기사는 자연스러운 한국어로 번역한다
@@ -699,7 +701,7 @@ def generate_summary(item):
     # 503이면 같은 모델을 최대 3번 재시도한다.
     for attempt in range(1, 4):
         try:
-            print(f"🤖 Gemini 요약 생성 중... ({attempt}/3)")
+            print(f" Gemini 요약 생성 중... ({attempt}/3)")
 
             result = client.models.generate_content(
                 model="gemini-3.6-flash",
@@ -713,7 +715,7 @@ def generate_summary(item):
 
         except Exception as e:
             print(
-                f"⚠️ Gemini 일시 오류 ({attempt}/3): "
+                f" Gemini 일시 오류 ({attempt}/3): "
                 f"{str(e)[:300]}"
             )
 
@@ -722,7 +724,7 @@ def generate_summary(item):
 
     # Gemini가 계속 장애여도 기사 자체를 버리지 않는다.
     # RSS 정보로 안전한 대체 본문을 만들어 Telegram 전송을 계속한다.
-    print("⚠️ Gemini 실패 → RSS 원문 요약으로 대체 전송")
+    print(" Gemini 실패 → RSS 원문 요약으로 대체 전송")
 
     fallback_summary = summary.strip()
 
@@ -743,51 +745,42 @@ def generate_summary(item):
 # =========================================================
 
 CLOSING_LABELS = [
-    "요약하자면..",
+    "짧게 요약하면..",
     "짧게 말씀드리면..",
-    "한 줄로 말씀드리면..",
-    "두 줄로 짧게 말씀드리면..",
-    "쉽게 말씀드리면..",
-    "간단히 정리하면..",
     "핵심만 말씀드리면..",
-    "결론적으로 보면..",
-    "지금 상황만 보면..",
-    "쉽게 풀어보면..",
+    "핵심만 정리하면..",
+    "간단히 정리하면..",
+    "쉽게 말하면..",
+    "한마디로 정리하면..",
+    "결론만 말씀드리면..",
+    "요점만 보면..",
+    "핵심 내용은..",
+    "간단히 보면..",
+    "정리해서 말씀드리면..",
+    "중요한 부분만 보면..",
+    "이번 뉴스의 핵심은..",
+    "결국 핵심은..",
+    "한줄로 정리하면..",
+    "요약해서 보면..",
+    "포인트만 짚으면..",
+    "간단하게 말씀드리면..",
+    "결론부터 보면..",
 ]
 
 
 def add_closing_label(text):
-
-    lines = [
-        line.rstrip()
-        for line in text.splitlines()
-    ]
-
-    # 빈 줄 제거
-    while lines and not lines[-1].strip():
-        lines.pop()
-
-    if not lines:
+    if not text:
         return text
 
-    # 마지막 문단을 핵심 요약으로 취급
-    last = lines[-1].strip()
+    parts = [p.strip() for p in text.split("\n\n") if p.strip()]
+    if len(parts) < 2:
+        return text
 
-    label = random.choice(
-        CLOSING_LABELS
-    )
+    label = random.choice(CLOSING_LABELS)
+    last = parts[-1]
+    body = "\n\n".join(parts[:-1])
+    return f"{body}\n\n{label}\n{last}"
 
-    # 마지막 줄 앞에 랜덤 라벨
-    lines[-1] = (
-        f"{label}\n{last}"
-    )
-
-    return "\n".join(lines)
-
-
-# =========================================================
-# 텔레그램 전송
-# =========================================================
 
 def send_telegram(
     text,
@@ -819,7 +812,7 @@ def send_telegram(
 
 
     message = (
-        f"{text}\n\n"f"🔗 기사 원문\n"
+        f"{text}\n\n"f" 기사 원문\n"
         f"{link}"
     )
 
@@ -866,7 +859,7 @@ def fetch_feed(
 ):
 
     print(
-        f"\n📡 RSS 확인: {source}"
+        f"\n RSS 확인: {source}"
     )
 
 
@@ -887,7 +880,7 @@ def fetch_feed(
     except Exception as e:
 
         print(
-            f"❌ {source} RSS 실패:",
+            f" {source} RSS 실패:",
             e
         )
 
@@ -980,7 +973,7 @@ def fetch_feed(
         except Exception as e:
 
             print(
-                "⚠️ 기사 파싱 실패:",
+                " 기사 파싱 실패:",
                 e
             )
 
@@ -1005,7 +998,7 @@ def main():
     )
 
     print(
-        "🚀 실시간 코인·경제 뉴스봇 시작"
+        " 실시간 코인·경제 뉴스봇 시작"
     )
 
     print(
@@ -1048,7 +1041,7 @@ def main():
         except Exception as e:
 
             print(
-                f"❌ {source} 처리 실패:",
+                f" {source} 처리 실패:",
                 e
             )
 
@@ -1056,14 +1049,14 @@ def main():
     if not entries:
 
         print(
-            "\n✅ 후보 뉴스가 없습니다."
+            "\n 후보 뉴스가 없습니다."
         )
 
         return
 
 
     print(
-        f"\n📥 전체 후보: "
+        f"\n 전체 후보: "
         f"{len(entries)}개"
     )
 
@@ -1123,7 +1116,7 @@ def main():
         ):
 
             print(
-                "⏭️ URL 중복:",
+                "⏭ URL 중복:",
                 item["title"]
             )
 
@@ -1140,7 +1133,7 @@ def main():
         ):
 
             print(
-                "⏭️ GUID 중복:",
+                "⏭ GUID 중복:",
                 item["title"]
             )
 
@@ -1157,7 +1150,7 @@ def main():
         ):
 
             print(
-                "⏭️ 제목 중복:",
+                "⏭ 제목 중복:",
                 item["title"]
             )
 
@@ -1209,7 +1202,7 @@ def main():
         if duplicate_title:
 
             print(
-                "⏭️ 유사 기사:",
+                "⏭ 유사 기사:",
                 item["title"]
             )
 
@@ -1217,7 +1210,7 @@ def main():
 
 
         # -------------------------------------------------
-        # ★ 싼 중복 검사 통과 후에만 실제 URL 확인
+        #  싼 중복 검사 통과 후에만 실제 URL 확인
         # -------------------------------------------------
 
         final_url = resolve_url(
@@ -1237,7 +1230,7 @@ def main():
         ):
 
             print(
-                "⏭️ 최종 URL 중복:",
+                "⏭ 최종 URL 중복:",
                 item["title"]
             )
 
@@ -1290,14 +1283,14 @@ def main():
     if not new_entries:
 
         print(
-            "\n✅ 새로 보낼 뉴스가 없습니다."
+            "\n 새로 보낼 뉴스가 없습니다."
         )
 
         return
 
 
     print(
-        f"\n🔥 미전송 새 뉴스 "
+        f"\n 미전송 새 뉴스 "
         f"{len(new_entries)}개 발견"
     )
 
@@ -1332,7 +1325,7 @@ def main():
 
 
     # =====================================================
-    # ★ 한 번에 최대 2개
+    #  한 번에 최대 2개
     # =====================================================
 
     selected = new_entries[
@@ -1341,7 +1334,7 @@ def main():
 
 
     print(
-        f"🏆 이번 실행 전송: "
+        f" 이번 실행 전송: "
         f"{len(selected)}개"
     )
 
@@ -1357,7 +1350,7 @@ def main():
         )
 
         print(
-            f"📰 {index}/"
+            f" {index}/"
             f"{len(selected)} | "
             f"{item['source']}"
         )
@@ -1392,7 +1385,7 @@ def main():
             if not text:
 
                 print(
-                    "❌ Gemini 요약 없음"
+                    " Gemini 요약 없음"
                 )
 
                 continue
@@ -1455,7 +1448,7 @@ def main():
 
 
             print(
-                "✅ 전송 완료"
+                " 전송 완료"
             )
 
 
@@ -1466,7 +1459,7 @@ def main():
         except Exception as e:
 
             print(
-                "❌ 기사 전송 실패:",
+                " 기사 전송 실패:",
                 e
             )
 
@@ -1481,7 +1474,7 @@ def main():
     )
 
     print(
-        "✅ 뉴스봇 실행 종료"
+        " 뉴스봇 실행 종료"
     )
 
     print(
