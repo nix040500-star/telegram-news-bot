@@ -41,8 +41,7 @@ SENT_FILE = "sent_urls.txt"
 MAX_ARTICLE_AGE_HOURS = 2
 
 #  한 번 실행할 때 최대 2개
-MAX_ARTICLES_PER_RUN = 2
-
+MAX_ARTICLES_PER_RUN = 1
 # 제목이 이 정도 이상 비슷하면 같은 뉴스로 판단
 TITLE_SIMILARITY = 0.78
 
