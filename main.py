@@ -3,6 +3,7 @@ import re
 import html
 import hashlib
 import urllib.parse
+import random
 from datetime import datetime, timezone, timedelta
 from difflib import SequenceMatcher
 
@@ -709,45 +710,123 @@ def clean_gemini_text(text):
         return ""
 
     text = text.strip()
-
-    text = re.sub(
-        r"```(?:markdown|text)?",
-        "",
-        text,
-        flags=re.I,
-    )
-
+    text = re.sub(r"```(?:markdown|text)?", "", text, flags=re.I)
     text = text.replace("```", "")
+    text = re.sub(r"\n{3,}", "\n\n", text)
 
-    text = re.sub(
-        r"\n{3,}",
-        "\n\n",
-        text,
+    # 모델이 실수로 붙여도 텔레그램에는 내부 문구/URL을 노출하지 않는다.
+    bad_prefixes = (
+        "출처:", "실제 출처:", "원문 보기", "RSS:", "URL:",
+        "링크:", "기사 링크:", "원문 링크:",
     )
+    cleaned = []
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            cleaned.append("")
+            continue
+        if s.startswith(bad_prefixes):
+            continue
+        if re.fullmatch(r"https?://\S+", s, flags=re.I):
+            continue
+        cleaned.append(line.rstrip())
 
+    text = "\n".join(cleaned)
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 
+WRAP_UP_LABELS = [
+    "쉽게 정리해드리면", "간단히 말씀드리면", "한마디로 정리하면", "딱 정리해보면",
+    "결국 핵심은 이겁니다", "그래서 무슨 말이냐면", "쉽게 풀어보면", "핵심만 말씀드리면",
+    "결론만 먼저 말씀드리면", "시장 입장에서 보면", "지금 중요한 건 이겁니다", "딱 두 줄로 보면",
+    "짧게 정리해드리면", "한 번에 정리하면", "쉽게 이해하시면 이렇습니다", "결국 봐야 할 건 이겁니다",
+    "지금 상황을 정리하면", "핵심만 뽑아보면", "중요한 부분만 보면", "결국 이야기는 간단합니다",
+    "쉽게 말씀드리자면", "한 줄씩 정리해보면", "정리해서 말씀드리면", "시장에서는 이렇게 보면 됩니다",
+    "결국 포인트는 이겁니다", "간단하게 풀면 이렇습니다", "지금까지 내용을 묶어보면", "핵심을 다시 보면",
+    "쉽게 보면 이런 얘기입니다", "결국 시장이 보는 건 이겁니다", "딱 필요한 부분만 보면", "요지만 말씀드리면",
+    "이걸 쉽게 바꿔 말하면", "지금 흐름만 놓고 보면", "결국 중요한 건 두 가지입니다", "시장 기준으로 풀어보면",
+    "한마디로 말씀드리면", "조금 더 쉽게 설명드리면", "결국 이렇게 보시면 됩니다", "짧게 풀어드리면",
+    "지금 뉴스의 핵심은 이겁니다", "결국 시장에 중요한 건", "내용을 쉽게 정리하면", "딱 핵심만 남기면",
+    "이 소식을 쉽게 보면", "결국 무슨 이야기냐면", "두 가지만 기억하시면 됩니다", "핵심만 다시 말씀드리면",
+    "시장에선 이렇게 받아들이면 됩니다", "간단히 풀어서 보면", "결국 체크할 부분은 이겁니다", "지금 포인트만 보면",
+    "쉽게 설명하면 이렇습니다", "한 번 더 정리해보면", "이 뉴스에서 볼 건 이겁니다", "결국 핵심만 보면",
+    "시장 영향만 놓고 보면", "지금 상황을 쉽게 보면", "딱 알아두실 건 이겁니다", "간단하게 말씀드리자면",
+    "결국 이렇게 이해하시면 됩니다", "뉴스를 쉽게 풀면", "핵심 내용만 묶으면", "지금 시장이 보는 부분은",
+    "한눈에 정리하면", "결국 중요한 부분은", "쉽게 바꿔서 말씀드리면", "시장 쪽에서 보면",
+    "짧고 쉽게 말씀드리면", "이 뉴스의 요지는", "결국 두 줄로 정리하면", "핵심만 콕 집으면",
+    "지금 알아두실 건", "시장 관점에서 정리하면", "쉽게 말해서 이런 상황입니다", "결국 흐름은 이렇습니다",
+    "내용을 한 번 묶어보면", "딱 핵심만 설명드리면", "이걸 시장 관점으로 보면", "결국 봐야 하는 부분은",
+    "간단하게 이해하면", "지금 뉴스만 놓고 보면", "핵심을 두 줄로 줄이면", "결국 시장의 관심은",
+    "쉽게 정리해서 보면", "이 소식의 핵심만 보면", "시장에 중요한 부분만 보면", "한마디로 풀어보면",
+    "지금까지 나온 내용만 보면", "결국 체크포인트는", "간단히 이해하시면", "핵심을 쉽게 풀면",
+    "딱 두 가지만 보면", "시장 반응을 생각하면", "결국 이 부분이 중요합니다", "쉽게 정리하면 이렇습니다",
+    "뉴스의 핵심을 잡아보면", "지금 시점에서 중요한 건", "결국 시장에는 이렇게 읽힙니다", "짧게 핵심만 보면",
+    "한 번에 이해하시려면", "이걸 두 줄로 줄이면", "결국 알아둘 건 이겁니다", "시장 기준으로 정리하면",
+    "쉽게 이해할 포인트는", "지금 내용의 핵심은", "결국 이 뉴스가 말하는 건", "간단히 핵심만 보면",
+    "시장에 미치는 부분만 보면", "딱 필요한 내용만 정리하면", "결국 이렇게 정리됩니다", "쉽게 풀어서 말씀드리면",
+    "핵심부터 다시 보면", "지금 가장 중요한 부분은", "한마디로 보면", "결국 시장에서 볼 건",
+    "짧게 두 줄로 정리하면", "이 뉴스만 쉽게 보면", "핵심만 빠르게 보면", "결국 중요한 이야기는",
+    "시장 입장에서 핵심만 보면", "쉽게 두 줄로 정리하면", "지금 알아야 할 핵심은", "결국 요점은 이겁니다",
+]
+
+def choose_wrap_up_label():
+    return random.choice(WRAP_UP_LABELS)
+
+
 def build_news_prompt(item):
+    line_target = random.randint(5, 9)
+    wrap_label = choose_wrap_up_label()
+
     return f"""
-너는 한국의 코인·미국증시 전문 뉴스방에서 일하는 뉴스 에디터다.
-아래 기사 정보만 사용해서 텔레그램용 한국어 뉴스를 작성한다.
+당신은 텔레그램에서 코인·미국증시 뉴스를 직접 설명해주는 한국인 운영자입니다.
+딱딱한 기사체나 번역기 말투가 아니라, 사람이 독자에게 자연스럽게 설명해주는 존댓말로 작성하세요.
 
-[형식]
-- 첫 줄: 구체적이고 자연스러운 한국어 제목
-- 본문: 3~5문장
-- 마지막 문장: 이 뉴스가 코인시장 또는 미국증시에 왜 중요한지 설명
-- 기사에 없는 사실/수치/전망은 절대 만들지 않는다.
-- 영어 원문을 그대로 복붙하지 않는다.
-- URL, 'RSS', 'AI 요약', '한도 초과' 같은 내부 문구는 출력하지 않는다.
-- 존댓말/이모지/투자권유를 사용하지 않는다.
-- 출처명은 텔레그램 출력에 절대 표시하지 않는다.
-- '출처:', '실제 출처:', 'RSS', 'AI 요약', '한도 초과', '자동 전송' 같은 내부 문구를 절대 출력하지 않는다.
-- 제목은 원문의 핵심 사건·수치·기업·자산명을 살려 구체적인 한국어 제목으로 작성한다.
-- 본문은 단순히 '관련 최신 기사다'라고 끝내지 말고, 제공된 기사 내용에서 확인되는 사실을 3~5문장으로 구체적으로 설명한다.
+[이번 뉴스 작성 방식]
+- 첫 줄은 자연스러운 한국어 제목 1줄입니다.
+- 그 다음 본문은 대략 {line_target}줄 분량으로 작성하세요.
+- 문장 수와 문장 길이를 매번 똑같이 맞추지 마세요.
+- 마지막에는 아래 마무리 문구를 정확히 한 번 넣고, 그 아래 핵심을 정확히 2줄로 정리하세요.
+- 이번 마무리 문구: "{wrap_label}"
 
-[실제 출처]
-{item.get("publisher") or item.get("source") or ""}
+[말투]
+- 친한 사람에게 뉴스를 이해하기 쉽게 설명해주는 자연스러운 존댓말을 사용하세요.
+- "최근 시장에서는 ~라는 걱정이 있었는데요.", "이 부분은 꽤 눈여겨볼 만합니다.",
+  "다만 이것만으로 방향이 정해졌다고 보기는 어렵습니다."처럼 문맥에 맞게 자연스럽게 이어가세요.
+- 모든 문장을 억지로 "~습니다" 하나로 끝내지 마세요.
+- "~인데요", "~겠죠", "~볼 수 있습니다", "~가능성이 있습니다", "~상황입니다",
+  "~나온 셈입니다" 등을 문맥에 맞게 섞되 같은 종결을 연달아 반복하지 마세요.
+- 반말, 음슴체, 논문체, 보도자료체, 번역체는 금지합니다.
+- "분위기가 형성됐습니다", "중요한 영향을 미칩니다"처럼 로봇 같은 상투 표현은 가급적 피하세요.
+- 기사 제목을 본문 첫 문장에서 그대로 다시 반복하지 마세요.
+
+[내용]
+- 제공된 기사 정보에서 확인되는 사실만 사용하세요.
+- 기사에 없는 수치·사건·전망은 만들지 마세요.
+- 핵심 수치, 기업명, 인물명, 자산명은 기사에 있다면 빠뜨리지 마세요.
+- 시장 영향은 근거가 있을 때만 설명하고, 확정되지 않은 내용은 단정하지 마세요.
+- 코인·미국증시 독자가 "그래서 이게 나한테 왜 중요한데?"를 이해할 수 있게 설명하세요.
+- 투자 권유는 하지 마세요.
+
+[절대 출력 금지]
+- 출처명
+- URL
+- "원문 보기"
+- RSS
+- AI 요약, 한도 초과, 자동 전송 같은 내부 문구
+- 이모지
+- 불필요한 영어 원문 복사
+
+[출력 예시 구조]
+자연스러운 한국어 제목
+
+자연스러운 설명...
+자연스러운 설명...
+(전체 본문은 이번에 약 {line_target}줄)
+
+{wrap_label}
+핵심 정리 첫 번째 줄
+핵심 정리 두 번째 줄
 
 [원문 제목]
 {item.get("title", "")}
@@ -758,10 +837,6 @@ def build_news_prompt(item):
 
 
 def generate_groq_summary(item):
-    """
-    Gemini 쿼터 초과 시 GROQ_API_KEY가 있으면 두 번째 AI로 자동 전환.
-    별도 SDK 없이 requests만 사용한다.
-    """
     if not GROQ_API_KEY:
         return ""
 
@@ -776,12 +851,20 @@ def generate_groq_summary(item):
                 "model": "openai/gpt-oss-120b",
                 "messages": [
                     {
+                        "role": "system",
+                        "content": (
+                            "당신은 한국 금융 뉴스방 운영자입니다. "
+                            "사람이 직접 설명하듯 자연스러운 존댓말을 쓰고, "
+                            "딱딱한 기사체와 번역체를 피합니다."
+                        ),
+                    },
+                    {
                         "role": "user",
                         "content": build_news_prompt(item),
-                    }
+                    },
                 ],
-                "temperature": 0.2,
-                "max_tokens": 700,
+                "temperature": 0.55,
+                "max_tokens": 1000,
             },
             timeout=30,
         )
@@ -798,114 +881,37 @@ def generate_groq_summary(item):
 
 
 def fallback_summary(item):
-    """
-    Gemini와 보조 AI가 모두 사용 불가일 때의 마지막 안전장치.
-    출처/RSS/AI 오류 문구는 텔레그램에 절대 노출하지 않는다.
-    """
-    title = clean_text(item.get("title", ""))
-    summary = clean_text(item.get("summary", ""))
-    title = re.sub(r"\s+-\s+[^-]{2,60}$", "", title).strip()
-
-    # 영어 원문을 그대로 게시하지 않기 위한 최소 용어 변환
-    replacements = [
-        (r"(?i)\bcore CPI\b", "근원 소비자물가"),
-        (r"(?i)\bCPI\b", "소비자물가지수"),
-        (r"(?i)\binflation\b", "인플레이션"),
-        (r"(?i)\bfederal reserve\b", "미 연준"),
-        (r"(?i)\bFed\b", "연준"),
-        (r"(?i)\binterest rates?\b", "금리"),
-        (r"(?i)\brate cuts?\b", "금리 인하"),
-        (r"(?i)\brate hikes?\b", "금리 인상"),
-        (r"(?i)\bbitcoin\b", "비트코인"),
-        (r"(?i)\bethereum\b", "이더리움"),
-        (r"(?i)\bcrypto(?:currency)?\b", "암호화폐"),
-        (r"(?i)\bNasdaq\b", "나스닥"),
-        (r"(?i)\bTreasury yields?\b", "미 국채금리"),
-        (r"(?i)\bWall Street\b", "미국 증시"),
-    ]
-    ko_title = title
-    for pattern, repl in replacements:
-        ko_title = re.sub(pattern, repl, ko_title)
-
-    # 번역이 불완전한 영어 제목은 그대로 노출하지 않는다.
-    if len(re.findall(r"[A-Za-z]", ko_title)) > max(12, len(re.findall(r"[가-힣]", ko_title)) * 2):
-        kind = item.get("feed_type", "")
-        ko_title = {
-            "crypto": "암호화폐 시장 주요 뉴스",
-            "stock": "미국 증시 주요 뉴스",
-            "macro": "미국 경제·금리 주요 뉴스",
-        }.get(kind, "글로벌 금융시장 주요 뉴스")
-
-    # AI 둘 다 막힌 경우에도 내부 상태/출처를 노출하지 않는다.
+    # 두 AI가 모두 실패하면 영어/RSS/출처를 그대로 뿌리지 않고 안전하게 짧게 전송한다.
     kind = item.get("feed_type", "")
-    body = {
-        "crypto": "암호화폐 시장에 영향을 줄 수 있는 주요 소식이 새로 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
-        "stock": "미국 증시와 주요 기업에 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
-        "macro": "미국 경제·금리·물가와 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.",
-    }.get(kind, "금융시장과 관련된 새로운 소식이 확인됐다. 자세한 내용은 아래 원문에서 확인할 수 있다.")
+    title = {
+        "crypto": "암호화폐 시장 주요 소식",
+        "stock": "미국 증시 주요 소식",
+        "macro": "미국 경제·금리 주요 소식",
+    }.get(kind, "글로벌 금융시장 주요 소식")
 
-    return f"{ko_title}\n\n{body}"
+    wrap_label = choose_wrap_up_label()
+    body = {
+        "crypto": "암호화폐 시장과 관련해 새로운 소식이 확인됐습니다.",
+        "stock": "미국 증시와 주요 기업에 관련된 새로운 소식이 확인됐습니다.",
+        "macro": "미국 경제와 금리 흐름에 관련된 새로운 소식이 확인됐습니다.",
+    }.get(kind, "금융시장과 관련된 새로운 소식이 확인됐습니다.")
+
+    return (
+        f"{title}\n\n{body}\n"
+        f"현재 확보된 기사 정보가 짧아 확인되지 않은 내용을 임의로 덧붙이지 않았습니다.\n\n"
+        f"{wrap_label}\n"
+        f"확인된 내용만 간단히 전달드렸습니다.\n"
+        f"제목을 누르면 원문 내용을 직접 확인하실 수 있습니다."
+    )
+
 
 def generate_summary(item):
-    # 키가 없거나 Gemini를 사용할 수 없어도 뉴스는 계속 전송
     if client is None:
         print("Gemini API 키 없음 - 보조 AI로 전환")
         alt_text = generate_groq_summary(item)
-        if alt_text:
-            return alt_text
-        print("보조 AI 사용 불가 - 기본 요약으로 전송")
-        return fallback_summary(item)
+        return alt_text or fallback_summary(item)
 
-    prompt = f"""
-너는 한국의 코인·미국증시 전문 뉴스방에서 일하는 최고 수준의 뉴스 에디터다.
-
-아래 기사 정보를 바탕으로 텔레그램에 바로 게시할 한국어 뉴스를 작성한다.
-
-[절대 규칙]
-
-1. 첫 줄에는 가장 중요한 사실이 바로 보이는 한국어 제목을 작성한다.
-2. 제목은 자극적으로 낚시하지 말고 실제 기사 내용만 반영한다.
-3. 영어 제목은 자연스러운 한국어 제목으로 완전히 바꾼다.
-4. 본문은 3~5문장으로 작성한다.
-5. 첫 문장에서 가장 중요한 사실부터 설명한다.
-6. 가격, 금액, 비율, 기업명, 인물명, 날짜 등 기사에 있는 핵심 수치는 빠뜨리지 않는다.
-7. 기사에 없는 사실·수치·전망을 절대 만들어내지 않는다.
-8. 같은 내용을 표현만 바꿔 반복하지 않는다.
-9. 불필요한 역사 설명이나 장황한 배경 설명은 제거한다.
-10. 번역기 같은 문체를 사용하지 않는다.
-11. 한국인이 실제 뉴스방에서 읽기 편한 자연스러운 뉴스체로 작성한다.
-12. 존댓말을 사용하지 않는다.
-13. 투자 권유를 하지 않는다.
-14. 상승·하락을 단정적으로 예측하지 않는다.
-15. 이모지와 이모티콘을 사용하지 않는다.
-16. URL을 출력하지 않는다.
-17. 출처 이름을 본문에 억지로 반복하지 않는다.
-18. '요약하면', '결론적으로', '포인트는', '쉽게 말하면' 같은 상투적인 머리말을 사용하지 않는다.
-19. 마지막 문장은 이 뉴스가 코인시장 또는 미국증시에 왜 중요한지 한 문장으로 설명한다.
-20. 원문 정보가 부족하면 부족한 내용을 추측해서 채우지 말고 확인 가능한 내용만 작성한다.
-21. RSS 문장을 그대로 복사하지 말고 의미를 유지하면서 자연스럽게 다시 작성한다.
-22. 독자가 20초 안에 핵심을 전부 이해할 수 있게 작성한다.
-23. 코인 뉴스라면 가격·ETF·규제·거래소·기관 자금·해킹 등 시장 영향 요소를 우선한다.
-24. 미국증시 뉴스라면 연준·금리·물가·고용·국채금리·빅테크·반도체·지수 영향 요소를 우선한다.
-25. 과장된 분석보다 사실 전달을 최우선으로 한다.
-
-[출력 형식]
-
-제목
-
-본문 3~5문장
-
-마지막 핵심 문장
-
-[출처]
-{item["source"]}
-
-[원문 제목]
-{item["title"]}
-
-[RSS 기사 내용]
-{clean_text(item["summary"])[:4500]}
-"""
+    prompt = build_news_prompt(item)
 
     for attempt in range(3):
         try:
@@ -913,20 +919,15 @@ def generate_summary(item):
                 model="gemini-3.6-flash",
                 contents=prompt,
             )
-
             result_text = getattr(result, "text", "")
-
             if result_text:
                 return clean_gemini_text(result_text)
 
         except Exception as e:
             error_text = str(e)
-            print(
-                f"Gemini 실패 {attempt + 1}/3:",
-                error_text[:200],
-            )
+            print(f"Gemini 실패 {attempt + 1}/3:", error_text[:200])
 
-            # 쿼터 초과는 재시도해도 바로 해결되지 않으므로 즉시 fallback
+            # 쿼터 초과는 기다리지 않고 즉시 Groq로 넘긴다.
             if (
                 "429" in error_text
                 or "RESOURCE_EXHAUSTED" in error_text
@@ -934,17 +935,11 @@ def generate_summary(item):
             ):
                 print("Gemini 쿼터 초과 - 보조 AI로 전환")
                 alt_text = generate_groq_summary(item)
-                if alt_text:
-                    return alt_text
-                print("보조 AI 사용 불가 - 기본 요약으로 전환")
-                return fallback_summary(item)
+                return alt_text or fallback_summary(item)
 
     print("Gemini 요약 최종 실패 - 보조 AI로 전환")
     alt_text = generate_groq_summary(item)
-    if alt_text:
-        return alt_text
-    print("보조 AI 사용 불가 - 기본 요약으로 전환")
-    return fallback_summary(item)
+    return alt_text or fallback_summary(item)
 
 
 # =========================================================
@@ -954,11 +949,18 @@ def generate_summary(item):
 def send_telegram(text, item):
     link = item["final_url"]
 
-    message = (
-        f"{text}\n\n"
-        f"원문 보기\n"
-        f"{link}"
-    )
+    # 첫 줄(한국어 제목)에 원문 URL을 하이퍼링크로 건다.
+    lines = text.strip().splitlines()
+    title = lines[0].strip() if lines else "뉴스 확인"
+    body = "\n".join(lines[1:]).strip()
+
+    safe_title = html.escape(title)
+    safe_link = html.escape(link, quote=True)
+    safe_body = html.escape(body)
+
+    message = f'<a href="{safe_link}"><b>{safe_title}</b></a>'
+    if safe_body:
+        message += f"\n\n{safe_body}"
 
     url = (
         "https://api.telegram.org/"
@@ -970,16 +972,15 @@ def send_telegram(text, item):
         data={
             "chat_id": TELEGRAM_CHAT_ID,
             "text": message,
-            "disable_web_page_preview": True,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": False,
         },
         timeout=20,
     )
 
     if not response.ok:
         raise RuntimeError(
-            f"Telegram 오류 "
-            f"{response.status_code}: "
-            f"{response.text}"
+            f"Telegram 오류 {response.status_code}: {response.text}"
         )
 
 
