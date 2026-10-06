@@ -517,6 +517,12 @@ def make_title_key(title):
     )
 
 
+def make_seen_title_key(title):
+    """과거 실행에서도 같은 사건인지 비교할 수 있도록 정규화 제목을 저장."""
+    normalized = normalize_title(title)
+    return f"SEEN_TITLE:{normalized}" if normalized else ""
+
+
 def make_event_key(title):
     tokens = sorted(event_tokens(title))
 
@@ -1142,6 +1148,13 @@ def main():
     sent_list = load_sent()
     sent_set = set(sent_list)
 
+    # 과거에 실제 전송된 제목을 복원해 교차 실행 중복까지 검사
+    sent_titles = [
+        x[len("SEEN_TITLE:"):]
+        for x in sent_list
+        if x.startswith("SEEN_TITLE:")
+    ]
+
     entries = []
 
     # -----------------------------------------
@@ -1208,6 +1221,14 @@ def main():
 
         # 과거 정확한 제목
         if title_key and title_key in sent_set:
+            continue
+
+        # 과거 전송 기사와 URL/언론사/제목이 달라도 같은 사건이면 차단
+        if any(
+            same_event_title(title, old_title)
+            for old_title in sent_titles
+        ):
+            print("과거 유사 뉴스 제외:", title)
             continue
 
         # 동일 실행 URL
@@ -1346,6 +1367,13 @@ def main():
             if key:
                 sent_list.append(key)
                 sent_set.add(key)
+
+        # 다음 실행에서도 같은 사건을 잡을 수 있도록 제목 자체도 기록
+        seen_title_key = make_seen_title_key(item["title"])
+        if seen_title_key:
+            sent_list.append(seen_title_key)
+            sent_set.add(seen_title_key)
+            sent_titles.append(normalize_title(item["title"]))
 
         save_sent(sent_list)
 
