@@ -775,7 +775,7 @@ def choose_wrap_up_label():
 
 
 def build_news_prompt(item):
-    line_target = random.randint(6, 12)
+    line_target = random.randint(5, 8)
     wrap_label = choose_wrap_up_label()
 
     return f"""
@@ -785,9 +785,9 @@ def build_news_prompt(item):
 [이번 뉴스 작성 방식]
 - 첫 줄은 자연스러운 한국어 제목 1줄입니다.
 - 그 다음 본문은 대략 {line_target}줄 분량으로 작성하세요.
-- 본문 요약은 휴대폰 화면에서 보이는 줄 수를 기준으로 6~12줄 사이에서 매번 랜덤한 길이로 작성하세요. 절대로 한 덩어리로 붙여 쓰지 마세요.
-- 본문을 2~4개의 짧은 문단으로 나누고, 각 문단 사이에는 반드시 빈 줄을 1줄 넣으세요.
-- 한 문단은 1~2문장 정도로 짧게 유지해서 휴대폰에서 한눈에 읽히게 하세요.
+- 본문은 매번 5~8개의 짧은 문장으로 자연스럽게 조절하세요. 전체 본문은 공백 포함 약 240~360자 정도로 제한하세요. 텔레그램 휴대폰 화면에서 자동 줄바꿈된 결과가 대략 8~15줄 안쪽에 들어오도록 작성하세요.
+- 본문은 2~3개의 짧은 문단으로 나누고, 문단 사이에는 반드시 빈 줄을 1줄 넣으세요.
+- 한 문단은 1~2문장으로 유지하고, 한 문장을 길게 늘이지 마세요.
 - 같은 의미를 반복하지 말고 핵심 사실과 시장에 필요한 맥락만 남기세요.
 - 문장 수와 문장 길이를 매번 똑같이 맞추지 마세요.
 - 마지막에는 아래 마무리 문구를 정확히 한 번 넣고, 그 아래 핵심을 2줄 중심으로 정리하되 화면상 최대 3줄을 넘기지 마세요.
@@ -995,13 +995,20 @@ def send_telegram(text, item):
     safe_wrap = html.escape(wrap)
     safe_link = html.escape(link, quote=True)
 
+    # 제목을 굵게 표시
     parts = [f"<b>{safe_title}</b>"]
 
     if safe_body:
         parts.append(safe_body)
 
     if safe_wrap:
-        parts.append(safe_wrap)
+        wrap_lines = safe_wrap.splitlines()
+        if wrap_lines:
+            # "쉽게 말씀드리자면" 같은 핵심 안내 문구를 굵게 표시
+            bold_wrap = f"<b>{wrap_lines[0]}</b>"
+            if len(wrap_lines) > 1:
+                bold_wrap += "\n" + "\n".join(wrap_lines[1:])
+            parts.append(bold_wrap)
 
     # 핵심 2줄까지 모두 보여준 뒤 맨 아래에 원문 하이퍼링크 배치
     parts.append(f'<a href="{safe_link}">원문 기사</a>')
