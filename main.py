@@ -775,7 +775,7 @@ def choose_wrap_up_label():
 
 
 def build_news_prompt(item):
-    line_target = random.randint(2, 4)
+    line_target = random.randint(4, 6)
     wrap_label = choose_wrap_up_label()
 
     return f"""
