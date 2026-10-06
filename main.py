@@ -785,6 +785,8 @@ def build_news_prompt(item):
 [이번 뉴스 작성 방식]
 - 첫 줄은 자연스러운 한국어 제목 1줄입니다.
 - 그 다음 본문은 대략 {line_target}줄 분량으로 작성하세요.
+- 본문은 2~3문장마다 빈 줄을 한 번 넣어서 모바일에서 읽기 편하게 나누세요.
+- 한 문단이 너무 길어지지 않게 하고, 내용 덩어리별로 자연스럽게 문단을 나누세요.
 - 문장 수와 문장 길이를 매번 똑같이 맞추지 마세요.
 - 마지막에는 아래 마무리 문구를 정확히 한 번 넣고, 그 아래 핵심을 정확히 2줄로 정리하세요.
 - 이번 마무리 문구: "{wrap_label}"
@@ -949,18 +951,44 @@ def generate_summary(item):
 def send_telegram(text, item):
     link = item["final_url"]
 
-    # 첫 줄(한국어 제목)에 원문 URL을 하이퍼링크로 건다.
     lines = text.strip().splitlines()
     title = lines[0].strip() if lines else "뉴스 확인"
-    body = "\n".join(lines[1:]).strip()
+    rest = lines[1:]
+
+    # 마무리 멘트가 시작되는 위치를 찾아 원문 링크를 그 바로 위에 넣는다.
+    wrap_index = None
+    for i, line in enumerate(rest):
+        if line.strip() in WRAP_UP_LABELS:
+            wrap_index = i
+            break
+
+    if wrap_index is None:
+        body_lines = rest
+        wrap_lines = []
+    else:
+        body_lines = rest[:wrap_index]
+        wrap_lines = rest[wrap_index:]
+
+    body = "\n".join(body_lines).strip()
+    wrap = "\n".join(wrap_lines).strip()
 
     safe_title = html.escape(title)
-    safe_link = html.escape(link, quote=True)
     safe_body = html.escape(body)
+    safe_wrap = html.escape(wrap)
+    safe_link = html.escape(link, quote=True)
 
-    message = f'<a href="{safe_link}"><b>{safe_title}</b></a>'
+    parts = [f"<b>{safe_title}</b>"]
+
     if safe_body:
-        message += f"\n\n{safe_body}"
+        parts.append(safe_body)
+
+    # 본문 마지막 문장 아래에 원문 하이퍼링크 배치
+    parts.append(f'<a href="{safe_link}">원문 기사</a>')
+
+    if safe_wrap:
+        parts.append(safe_wrap)
+
+    message = "\n\n".join(parts)
 
     url = (
         "https://api.telegram.org/"
