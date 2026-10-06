@@ -869,7 +869,7 @@ def generate_groq_summary(item):
                     },
                 ],
                 "temperature": 0.55,
-                "max_tokens": 1000,
+                "max_tokens": 1600,
             },
             timeout=30,
         )
@@ -883,6 +883,18 @@ def generate_groq_summary(item):
         print("보조 AI 실패:", str(e)[:200])
 
     return ""
+
+
+def is_incomplete_summary(text):
+    """제목만 나오거나 본문이 거의 없는 AI 응답을 걸러낸다."""
+    if not text:
+        return True
+    lines = [x.strip() for x in text.splitlines() if x.strip()]
+    if len(lines) < 5:
+        return True
+    # 제목을 제외한 실제 내용이 너무 짧으면 실패로 본다.
+    body_chars = len("".join(lines[1:]))
+    return body_chars < 120
 
 
 def fallback_summary(item):
@@ -952,6 +964,9 @@ def generate_summary(item):
 # =========================================================
 
 def send_telegram(text, item):
+    if is_incomplete_summary(text):
+        raise RuntimeError("AI 요약이 제목만 생성되어 전송을 중단했습니다.")
+
     link = item["final_url"]
 
     lines = text.strip().splitlines()
