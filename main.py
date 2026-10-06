@@ -2,6 +2,7 @@ import os
 import re
 import html
 import hashlib
+import base64
 import urllib.parse
 import random
 from datetime import datetime, timezone, timedelta
@@ -320,6 +321,53 @@ def same_event_title(a, b):
         (len(common) >= 3 and overlap >= 0.50)
         or (len(common) >= 2 and overlap >= 0.72)
     )
+
+
+# =========================================================
+# 초강력 사건 단위 중복 차단
+# =========================================================
+EVENT_ALIASES = {
+    "bitcoin": ("bitcoin","btc","비트코인"), "ethereum": ("ethereum","eth","이더리움"),
+    "xrp": ("xrp","ripple","리플"), "solana": ("solana","sol","솔라나"),
+    "dogecoin": ("dogecoin","doge","도지코인"), "fed": ("federal reserve","fed","fomc","연준"),
+    "powell": ("powell","파월"), "rates": ("interest rate","rate cut","rate hike","금리","금리인하","금리 인하","금리인상","금리 인상"),
+    "inflation": ("inflation","cpi","ppi","인플레이션","소비자물가"), "etf": ("etf",), "sec": ("sec",),
+    "coinbase": ("coinbase",), "binance": ("binance",), "tether": ("tether","usdt","테더"),
+    "nvidia": ("nvidia","nvda","엔비디아"), "tesla": ("tesla","tsla","테슬라"), "nasdaq": ("nasdaq","나스닥"),
+}
+ACTION_ALIASES = {
+    "approval": ("approval","approved","approve","승인"), "lawsuit": ("lawsuit","sues","sued","소송"),
+    "hack": ("hack","hacked","exploit","해킹"), "price": ("price","rises","falls","surges","drops","가격","상승","하락","급등","급락"),
+    "buy": ("buy","buys","purchase","매수","구매"), "sell": ("sell","sells","sale","매도","판매"),
+    "launch": ("launch","launches","출시"), "filing": ("filing","files","신청","제출"),
+}
+def canonical_tags(text, table):
+    s=clean_text(text).lower()
+    return {k for k,v in table.items() if any(x.lower() in s for x in v)}
+
+def encode_seen_story(title, summary):
+    raw=f"{normalize_title(title)}\t{clean_text(summary).lower()}"
+    return "SEEN_STORY:"+base64.urlsafe_b64encode(raw.encode()).decode()
+
+def decode_seen_story(value):
+    try:
+        raw=base64.urlsafe_b64decode(value[len("SEEN_STORY:"):].encode()).decode()
+        return tuple(raw.split("\t",1))
+    except Exception:
+        return ("","")
+
+def same_story(a_title,a_summary,b_title,b_summary):
+    if same_event_title(a_title,b_title): return True
+    at=f"{a_title} {a_summary}"; bt=f"{b_title} {b_summary}"
+    ta=event_tokens(at); tb=event_tokens(bt)
+    if ta and tb:
+        common=ta&tb
+        if len(common)>=4 and len(common)/max(1,min(len(ta),len(tb)))>=0.42: return True
+    subjects=canonical_tags(at,EVENT_ALIASES)&canonical_tags(bt,EVENT_ALIASES)
+    actions=canonical_tags(at,ACTION_ALIASES)&canonical_tags(bt,ACTION_ALIASES)
+    if subjects and actions: return True
+    if len(subjects)>=2: return True
+    return False
 
 
 # =========================================================
@@ -1154,6 +1202,8 @@ def main():
         for x in sent_list
         if x.startswith("SEEN_TITLE:")
     ]
+    sent_stories = [decode_seen_story(x) for x in sent_list if x.startswith("SEEN_STORY:")]
+    sent_stories = [(a,b) for a,b in sent_stories if a]
 
     entries = []
 
@@ -1223,12 +1273,12 @@ def main():
         if title_key and title_key in sent_set:
             continue
 
-        # 과거 전송 기사와 URL/언론사/제목이 달라도 같은 사건이면 차단
-        if any(
-            same_event_title(title, old_title)
-            for old_title in sent_titles
+        # 과거 전송 기사와 URL/언론사/언어/제목이 달라도 같은 사건이면 차단
+        if any(same_event_title(title, old_title) for old_title in sent_titles) or any(
+            same_story(title, item["summary"], old_title, old_summary)
+            for old_title, old_summary in sent_stories
         ):
-            print("과거 유사 뉴스 제외:", title)
+            print("과거 동일 사건 뉴스 제외:", title)
             continue
 
         # 동일 실행 URL
@@ -1242,11 +1292,8 @@ def main():
         # 서로 다른 언론사의 같은 사건 차단
         duplicate = False
 
-        for old_title in current_titles:
-            if same_event_title(
-                title,
-                old_title,
-            ):
+        for old_item in candidates:
+            if same_story(title, item["summary"], old_item["title"], old_item["summary"]):
                 duplicate = True
                 break
 
@@ -1374,6 +1421,11 @@ def main():
             sent_list.append(seen_title_key)
             sent_set.add(seen_title_key)
             sent_titles.append(normalize_title(item["title"]))
+
+        seen_story_key = encode_seen_story(item["title"], item["summary"])
+        sent_list.append(seen_story_key)
+        sent_set.add(seen_story_key)
+        sent_stories.append((normalize_title(item["title"]), clean_text(item["summary"]).lower()))
 
         save_sent(sent_list)
 
