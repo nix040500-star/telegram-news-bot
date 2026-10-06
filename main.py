@@ -775,7 +775,7 @@ def choose_wrap_up_label():
 
 
 def build_news_prompt(item):
-    line_target = random.randint(5, 9)
+    line_target = random.randint(3, 6)
     wrap_label = choose_wrap_up_label()
 
     return f"""
@@ -789,6 +789,7 @@ def build_news_prompt(item):
 - 한 문단이 너무 길어지지 않게 하고, 내용 덩어리별로 자연스럽게 문단을 나누세요.
 - 문장 수와 문장 길이를 매번 똑같이 맞추지 마세요.
 - 마지막에는 아래 마무리 문구를 정확히 한 번 넣고, 그 아래 핵심을 정확히 2줄로 정리하세요.
+- 핵심 2줄은 너무 짧게 끊지 말고, 각 줄을 충분한 한 문장으로 작성하세요. 첫 줄은 사건의 의미를, 둘째 줄은 코인·미국증시 등 시장에 어떤 점을 봐야 하는지 구체적으로 설명하세요.
 - 이번 마무리 문구: "{wrap_label}"
 
 [말투]
@@ -982,11 +983,11 @@ def send_telegram(text, item):
     if safe_body:
         parts.append(safe_body)
 
-    # 본문 마지막 문장 아래에 원문 하이퍼링크 배치
-    parts.append(f'<a href="{safe_link}">원문 기사</a>')
-
     if safe_wrap:
         parts.append(safe_wrap)
+
+    # 핵심 2줄까지 모두 보여준 뒤 맨 아래에 원문 하이퍼링크 배치
+    parts.append(f'<a href="{safe_link}">원문 기사</a>')
 
     message = "\n\n".join(parts)
 
