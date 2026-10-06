@@ -2,7 +2,7 @@ name: Daily News Auto Summary
 
 on:
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 concurrency:
