@@ -23,7 +23,7 @@ GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 
 KST = timezone(timedelta(hours=9))
 
-SENT_FILE = "sent_urls.txt"
+SENT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sent_urls.txt")
 
 # 최대 6시간 이내 기사
 # 뉴스가 부족해서 아무것도 안 올라오는 문제를 줄이기 위해
@@ -34,7 +34,7 @@ MAX_ARTICLE_AGE_HOURS = 6
 MAX_ARTICLES_PER_RUN = 1
 
 # 유사 제목 중복 기준
-TITLE_SIMILARITY = 0.76
+TITLE_SIMILARITY = 0.68
 
 # 중복 기록 최대 보관량
 MAX_SENT_HISTORY = 10000
@@ -317,8 +317,8 @@ def same_event_title(a, b):
     )
 
     return (
-        len(common) >= 3
-        and overlap >= 0.60
+        (len(common) >= 3 and overlap >= 0.50)
+        or (len(common) >= 2 and overlap >= 0.72)
     )
 
 
